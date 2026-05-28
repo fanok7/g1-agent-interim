@@ -1,0 +1,8 @@
+# Python 3.8 requis (SDK Unitree incompatible avec versions supérieures)
+
+numpy
+sounddevice
+websockets
+python-dotenv
+requests
+supabase
