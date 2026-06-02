@@ -1,6 +1,6 @@
 import json
 import websockets
-from config import REALTIME_URL, OPENAI_API_KEY, VOICE, SYSTEM_PROMPT
+from config import REALTIME_URL, OPENAI_API_KEY, VOICE, build_system_prompt
 from tools.registry import get_schemas
 
 
@@ -14,7 +14,7 @@ async def connect():
         'type': 'session.update',
         'session': {
             'type': 'realtime',
-            'instructions': SYSTEM_PROMPT,
+            'instructions': build_system_prompt(),
             'output_modalities': ['audio'],
             'audio': {
                 'input': {
