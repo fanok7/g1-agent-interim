@@ -1,0 +1,328 @@
+Ciseaux_droite:
+  index:
+    max: 1250
+    min: 129
+    value: 129
+  middle:
+    max: 1500
+    min: 78
+    value: 78
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Ciseaux_gauche:
+  index:
+    max: 1250
+    min: 129
+    value: 129
+  middle:
+    max: 1500
+    min: 78
+    value: 78
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Doigt_dhonneur_droite:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 78
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Doigt_dhonneur_gauche:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 78
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Feuille_droite:
+  index:
+    max: 1250
+    min: 129
+    value: 129
+  middle:
+    max: 1500
+    min: 78
+    value: 78
+  pinky:
+    max: 1800
+    min: 106
+    value: 106
+  ring:
+    max: 1800
+    min: 126
+    value: 126
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Feuille_gauche:
+  index:
+    max: 1250
+    min: 129
+    value: 129
+  middle:
+    max: 1500
+    min: 78
+    value: 78
+  pinky:
+    max: 1800
+    min: 106
+    value: 106
+  ring:
+    max: 1800
+    min: 126
+    value: 126
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Main_ouverte_droite:
+  index: 0.129
+  middle: 0.078
+  pinky: 0.106
+  ring: 0.126
+  thumb_bend: 0.246
+  thumb_rot: 0.05
+Main_ouverte_gauche:
+  index: 0.129
+  middle: 0.078
+  pinky: 0.106
+  ring: 0.126
+  thumb_bend: 0.246
+  thumb_rot: 0.05
+Pierre_droite:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 1500
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Pierre_gauche:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 1500
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+Pouce_droite:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 1500
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 246
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 50
+Pouce_gauche:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 1500
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 246
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 50
+main_fermer_droite:
+  index: 0.998
+  middle: 0.998
+  pinky: 0.998
+  ring: 0.999
+  thumb_bend: 0.999
+  thumb_rot: 0.998
+main_fermer_gauche:
+  index: 0.998
+  middle: 0.998
+  pinky: 0.998
+  ring: 0.999
+  thumb_bend: 0.999
+  thumb_rot: 0.998
+pierre_droite:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 1500
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
+pierre_gauche:
+  index:
+    max: 1250
+    min: 129
+    value: 1250
+  middle:
+    max: 1500
+    min: 78
+    value: 1500
+  pinky:
+    max: 1800
+    min: 106
+    value: 1800
+  ring:
+    max: 1800
+    min: 126
+    value: 1800
+  thumb_bend:
+    max: 1250
+    min: 246
+    value: 1250
+  thumb_rot:
+    max: 1500
+    min: 50
+    value: 1500
