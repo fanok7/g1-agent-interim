@@ -29,12 +29,13 @@ async def send_audio_loop(ws):
 
 
 async def receive_events_loop(ws):
-    audio_buf  = bytearray()
-    text_buf   = ''
-    tool_id    = None
-    tool_name  = None
-    tool_args  = ''
-    responding = False
+    audio_buf       = bytearray()
+    text_buf        = ''
+    tool_id         = None
+    tool_name       = None
+    tool_args       = ''
+    responding      = False
+    pending_tool_output = None  # (tool_id, result) à envoyer après response.done
 
     async for raw in ws:
         e = json.loads(raw)
@@ -65,6 +66,17 @@ async def receive_events_loop(ws):
                 text_buf = ''
                 responding = False
 
+        elif t == 'response.done':
+            responding = False
+            if pending_tool_output:
+                tid, result = pending_tool_output
+                pending_tool_output = None
+                await ws.send(json.dumps({
+                    'type': 'conversation.item.create',
+                    'item': {'type': 'function_call_output', 'call_id': tid, 'output': result}
+                }))
+                await ws.send(json.dumps({'type': 'response.create'}))
+
         elif t == 'response.output_item.added':
             item = e.get('item', {})
             if item.get('type') == 'function_call':
@@ -85,11 +97,14 @@ async def receive_events_loop(ws):
                 print(f'[TOOL] Erreur : {ex}')
                 result = str(ex)
 
-            await ws.send(json.dumps({
-                'type': 'conversation.item.create',
-                'item': {'type': 'function_call_output', 'call_id': tool_id, 'output': result}
-            }))
-            await ws.send(json.dumps({'type': 'response.create'}))
+            if responding:
+                pending_tool_output = (tool_id, result)
+            else:
+                await ws.send(json.dumps({
+                    'type': 'conversation.item.create',
+                    'item': {'type': 'function_call_output', 'call_id': tool_id, 'output': result}
+                }))
+                await ws.send(json.dumps({'type': 'response.create'}))
             tool_id = tool_name = None
             tool_args = ''
 

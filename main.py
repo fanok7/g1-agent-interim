@@ -15,6 +15,9 @@ import tools.web_search    # noqa: F401
 import tools.database      # noqa: F401
 import tools.gesture_tool  # noqa: F401
 import tools.gmail         # noqa: F401
+import tools.airlabs_tools   # noqa: F401
+import tools.transport_tools   # noqa: F401
+import tools.googlemaps_tools  # noqa: F401
 
 from agent.session import connect
 from agent.events import send_audio_loop, receive_events_loop

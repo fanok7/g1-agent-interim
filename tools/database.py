@@ -53,3 +53,57 @@ register(
     },
     handler=_handler
 )
+
+
+def _handler_badge(nom: str = None, numero_badge: str = None) -> str:
+    print(f'[SUPABASE] Recherche badge nom="{nom}" numero="{numero_badge}"')
+    if _supabase is None:
+        return 'Erreur : base de données non connectée.'
+    if not nom and not numero_badge:
+        return 'Veuillez fournir un nom de famille ou un numéro de badge.'
+    try:
+        query = _supabase.table('badges_corsur') \
+            .select('nom, prenom, "dateNaissance", email, "numeroDemande", "numeroBadge", etat, "dateSoumission", "dateFinAccordee", "numAA", entreprise')
+        if numero_badge:
+            query = query.ilike('"numeroBadge"', f'%{numero_badge}%')
+        else:
+            query = query.ilike('nom', f'%{nom}%')
+        result = query.limit(3).execute()
+        if not result.data:
+            critere = numero_badge if numero_badge else nom
+            return f'Aucun badge trouvé pour "{critere}".'
+        lignes = []
+        for c in result.data:
+            lignes.append(
+                f"{c.get('prenom', '')} {c.get('nom', '')} — "
+                f"Entreprise: {c.get('entreprise') or 'non renseignée'} — "
+                f"N° badge: {c.get('numeroBadge') or 'non attribué'} — "
+                f"N° demande: {c.get('numeroDemande') or 'non renseigné'} — "
+                f"État: {c.get('etat') or 'inconnu'} — "
+                f"Fin accordée: {c.get('dateFinAccordee') or 'non renseignée'} — "
+                f"N° AA: {c.get('numAA') or 'non renseigné'}"
+            )
+        return '\n'.join(lignes)
+    except Exception as e:
+        print(f'[SUPABASE] ERREUR badge : {e}')
+        return f'Erreur base de données : {e}'
+
+
+register(
+    schema={
+        'name': 'chercher_badge',
+        'description': (
+            'Recherche le dossier de badge aéroportuaire (CORSUR) d\'une personne par son nom de famille. '
+            'Retourne le numéro de badge, l\'état de la demande, la date de fin accordée, l\'entreprise et le numéro AA.'
+        ),
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'nom': {'type': 'string', 'description': 'Nom de famille (ex: Dupont)'},
+                'numero_badge': {'type': 'string', 'description': 'Numéro de badge CORSUR (ex: 123456)'}
+            },
+            'required': []
+        }
+    },
+    handler=_handler_badge
+)
