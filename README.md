@@ -1,6 +1,6 @@
 # G1 Agent Interim — Documentation
 
-Agent vocal d'accueil pour une agence d'interim sur robot Unitree G1 EDU (Jetson Orin NX).
+Agent vocal d'accueil pour I-Interim sur robot Unitree G1 EDU (Jetson Orin NX).
 
 ## Lancement
 

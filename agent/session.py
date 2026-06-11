@@ -1,6 +1,6 @@
 import json
 import websockets
-from config import REALTIME_URL, OPENAI_API_KEY, VOICE, build_system_prompt
+from config import REALTIME_URL, OPENAI_API_KEY, VOICE, SYSTEM_PROMPT
 from tools.registry import get_schemas
 
 
@@ -10,29 +10,35 @@ async def connect():
     ws = await websockets.connect(REALTIME_URL, extra_headers=headers)
     print('[AGENT] Connecté.')
 
+    schemas = get_schemas()
     await ws.send(json.dumps({
         'type': 'session.update',
         'session': {
             'type': 'realtime',
-            'instructions': build_system_prompt(),
+            'instructions': SYSTEM_PROMPT,
             'output_modalities': ['audio'],
             'audio': {
                 'input': {
                     'format': {'type': 'audio/pcm', 'rate': 24000},
-                    'transcription': {'model': 'gpt-4o-mini-transcribe'},
+                    'transcription': {
+                        'model': 'gpt-4o-mini-transcribe',
+                        'language': 'fr',
+                    },
                     'turn_detection': {
                         'type': 'semantic_vad',
-                        'interrupt_response': True
-                    }
+                        'interrupt_response': True,
+                        'create_response': True,
+                        'eagerness': 'medium',
+                    },
                 },
                 'output': {
                     'format': {'type': 'audio/pcm', 'rate': 24000},
-                    'voice': VOICE
-                }
+                    'voice': VOICE,
+                },
             },
-            'tools': get_schemas(),
+            'tools': schemas,
             'tool_choice': 'auto',
         }
     }))
-    print(f'[AGENT] Session configurée — {len(get_schemas())} tool(s) actif(s)')
+    print(f'[AGENT] Session configurée — {len(schemas)} tool(s) actif(s)')
     return ws
