@@ -26,11 +26,7 @@ HANDS_CONFIG = {
 }
 PORT          = 6000
 DEVICE_ID     = 1
-<<<<<<< HEAD
-GESTURES_FILE = "hand_gestures.yaml"
-=======
 GESTURES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_gestures.yaml")
->>>>>>> vision_dev
 
 REG_POS_SET  = 1474
 REG_FORCE_SET= 1498
@@ -41,11 +37,7 @@ FINGER_NAMES = ["pinky", "ring", "middle", "index", "thumb_bend", "thumb_rot"]
 THUMB_INDICES = [4, 5]   # thumb_bend, thumb_rot — délai 1s
 
 FORCE_DEFAULT = 800
-<<<<<<< HEAD
-SPEED_DEFAULT = 300
-=======
 SPEED_DEFAULT = 1000
->>>>>>> vision_dev
 THUMB_DELAY   = 1.0      # secondes avant de bouger le pouce
 
 # Poses par défaut si YAML absent
@@ -76,27 +68,13 @@ def norm_to_raw(name, val_norm):
     return int(lim["min"] + val_norm * (lim["max"] - lim["min"]))
 
 # ── Chargement poses ──────────────────────────────────────────────────────────
-<<<<<<< HEAD
-def load_poses():
-=======
 def load_poses(side="r"):
     suffix = "droite" if side == "r" else "gauche"
->>>>>>> vision_dev
     if not os.path.exists(GESTURES_FILE):
         print(f"[WARN] {GESTURES_FILE} absent — poses par défaut utilisées")
         return DEFAULT_POSES
     with open(GESTURES_FILE) as f:
         data = yaml.safe_load(f) or {}
-<<<<<<< HEAD
-    # Garder uniquement pierre/feuille/ciseaux
-    poses = {}
-    for geste in ["pierre", "feuille", "ciseaux"]:
-        if geste in data:
-            poses[geste] = data[geste]
-        else:
-            poses[geste] = DEFAULT_POSES[geste]
-            print(f"[WARN] Pose '{geste}' absente du YAML — défaut utilisé")
-=======
     poses = {}
     for geste in ["pierre", "feuille", "ciseaux"]:
         key = next((k for k in [f"{geste}_{suffix}", f"{geste.capitalize()}_{suffix}"]
@@ -113,7 +91,6 @@ def load_poses(side="r"):
             else:
                 normalized[finger] = float(val)
         poses[geste] = normalized
->>>>>>> vision_dev
     return poses
 
 # ── Classe principale ─────────────────────────────────────────────────────────
@@ -122,11 +99,7 @@ class RPSHand:
         cfg            = HANDS_CONFIG[side]
         self.ip        = cfg["ip"]
         self.name      = cfg["name"]
-<<<<<<< HEAD
-        self.poses     = load_poses()
-=======
         self.poses     = load_poses(side)
->>>>>>> vision_dev
         self.client    = ModbusTcpClient(self.ip, port=PORT)
         self.connected = self.client.connect()
 
@@ -140,14 +113,6 @@ class RPSHand:
             print(f"[WARN] Main {self.name} non connectée — mode simulation")
 
     def _send(self, positions):
-<<<<<<< HEAD
-        if self.connected:
-            self.client.write_registers(REG_POS_SET,
-                                        [int(v) for v in positions],
-                                        slave=DEVICE_ID)
-        else:
-            print(f"[SIM] Envoi : {positions}")
-=======
         if not self.connected:
             print(f"[SIM] Envoi : {positions}")
             return
@@ -157,7 +122,6 @@ class RPSHand:
                                         slave=DEVICE_ID)
         except Exception as e:
             print(f"[{self.name}] Erreur Modbus : {e}")
->>>>>>> vision_dev
 
     def play(self, geste):
         """
@@ -191,12 +155,6 @@ class RPSHand:
         print(f"[{self.name}] Ouverture")
 
     def disconnect(self):
-<<<<<<< HEAD
-        self.open()
-        time.sleep(1.0)
-        if self.connected:
-            self.client.close()
-=======
         """Ouvre la main puis ferme la connexion. Idempotent."""
         if not self.connected:
             return
@@ -204,7 +162,6 @@ class RPSHand:
         time.sleep(1.0)
         self.client.close()
         self.connected = False
->>>>>>> vision_dev
         print(f"[{self.name}] Déconnectée")
 
 # ── Test standalone ───────────────────────────────────────────────────────────

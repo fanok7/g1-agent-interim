@@ -123,15 +123,6 @@ async def _flush_results(ws, results):
 
 
 async def receive_events_loop(ws):
-<<<<<<< HEAD
-    audio_buf       = bytearray()
-    text_buf        = ''
-    tool_id         = None
-    tool_name       = None
-    tool_args       = ''
-    responding      = False
-    pending_tool_output = None  # (tool_id, result) à envoyer après response.done
-=======
     loop = asyncio.get_event_loop()
 
     audio_buf      = bytearray()
@@ -144,7 +135,6 @@ async def receive_events_loop(ws):
     _calls   = {}   # call_id → {'name': str, 'args': str}   — en cours de streaming
     _results = []   # [(call_id, name, result)]               — prêts, batch courant
     _queued  = []   # [(call_id, name, result)]               — différés (robot parlait)
->>>>>>> vision_dev
 
     async for raw in ws:
         e = json.loads(raw)
@@ -212,17 +202,6 @@ async def receive_events_loop(ws):
                 if forced == 'demarrer_pfc':
                     rps_go_pending = True
 
-        elif t == 'response.done':
-            responding = False
-            if pending_tool_output:
-                tid, result = pending_tool_output
-                pending_tool_output = None
-                await ws.send(json.dumps({
-                    'type': 'conversation.item.create',
-                    'item': {'type': 'function_call_output', 'call_id': tid, 'output': result}
-                }))
-                await ws.send(json.dumps({'type': 'response.create'}))
-
         elif t == 'response.output_item.added':
             item = e.get('item', {})
             if item.get('type') == 'function_call':
@@ -255,25 +234,12 @@ async def receive_events_loop(ws):
                 print(f'[TOOL] Erreur : {ex}')
                 result = str(ex)
 
-<<<<<<< HEAD
-            if responding:
-                pending_tool_output = (tool_id, result)
-            else:
-                await ws.send(json.dumps({
-                    'type': 'conversation.item.create',
-                    'item': {'type': 'function_call_output', 'call_id': tool_id, 'output': result}
-                }))
-                await ws.send(json.dumps({'type': 'response.create'}))
-            tool_id = tool_name = None
-            tool_args = ''
-=======
             # Si le robot parle encore, différer ; sinon accumuler dans le batch courant.
             # Le flush réel se fait sur response.done, pas ici.
             if responding:
                 _queued.append((cid, name, str(result)))
             else:
                 _results.append((cid, name, str(result)))
->>>>>>> vision_dev
 
         elif t == 'error':
             print(f'[ERREUR] {e.get("error", {})}')

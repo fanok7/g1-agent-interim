@@ -23,14 +23,6 @@ def _api_key() -> str:
 
 def _get(path: str, params: dict) -> dict:
     params["api_key"] = _api_key()
-<<<<<<< HEAD
-    with httpx.Client(timeout=10.0) as client:
-        response = client.get(f"{_BASE_URL}{path}", params=params)
-    if not response.is_success:
-        raise AirlabsError(f"HTTP {response.status_code}: {response.text[:200]}")
-    data = response.json()
-    if "error" in data:
-=======
     try:
         with httpx.Client(timeout=15.0) as client:
             response = client.get(f"{_BASE_URL}{path}", params=params)
@@ -46,7 +38,6 @@ def _get(path: str, params: dict) -> dict:
     data = response.json()
     if "error" in data:
         print(f"[AIRLABS] erreur API sur {path} : {data['error']}", flush=True)
->>>>>>> vision_dev
         raise AirlabsError(data["error"].get("message", str(data["error"])))
     return data
 
@@ -57,23 +48,14 @@ def _fetch_airport(iata_code: str) -> Optional[dict]:
     return results[0] if results else None
 
 
-<<<<<<< HEAD
-def _fetch_schedules(*, dep_iata: Optional[str] = None, arr_iata: Optional[str] = None, limit: int = 50) -> list:
-=======
 def _fetch_schedules(*, dep_iata: Optional[str] = None, arr_iata: Optional[str] = None,
                      limit: int = 50, status: Optional[str] = None,
                      airline_iata: Optional[str] = None) -> list:
->>>>>>> vision_dev
     params: dict = {"limit": limit}
     if dep_iata:
         params["dep_iata"] = dep_iata
     if arr_iata:
         params["arr_iata"] = arr_iata
-<<<<<<< HEAD
-    return _get("/schedules", params).get("response", [])
-
-
-=======
     if status:
         params["status"] = status
     if airline_iata:
@@ -137,7 +119,6 @@ def _fetch_board(*, dep_iata: Optional[str] = None, arr_iata: Optional[str] = No
     return flights
 
 
->>>>>>> vision_dev
 def _fetch_live_flights(*, dep_iata: Optional[str] = None, arr_iata: Optional[str] = None) -> list:
     params: dict = {}
     if dep_iata:
@@ -233,8 +214,6 @@ def _pick(d: dict, keys: tuple) -> dict:
     return {k: d[k] for k in keys if k in d}
 
 
-<<<<<<< HEAD
-=======
 def _hm(value) -> Optional[str]:
     """'2026-06-15 08:25' → '08:25'. Renvoie None si vide."""
     if not value:
@@ -435,7 +414,6 @@ def _filter_terminal(flights: list, key: str, terminal: str) -> list:
     return out
 
 
->>>>>>> vision_dev
 # --- tool functions ---
 
 def get_airport_info(iata_code: str) -> dict:
@@ -449,13 +427,6 @@ def get_airport_info(iata_code: str) -> dict:
         return {"error": str(e)}
 
 
-<<<<<<< HEAD
-def get_departures(iata_code: str, limit: int = 20) -> dict:
-    """Return the scheduled departure board for an airport."""
-    try:
-        flights = _fetch_schedules(dep_iata=iata_code, limit=min(limit, 50))
-        return {"count": len(flights), "departures": [_pick(f, _SCHEDULE_KEYS) for f in flights]}
-=======
 def get_departures(iata_code: str, limit: int = 20, terminal: str = None,
                    destination: str = None, from_time: str = None) -> dict:
     """Return upcoming departures for an airport, optionally filtered by terminal,
@@ -486,18 +457,10 @@ def get_departures(iata_code: str, limit: int = 20, terminal: str = None,
             # Heure demandée hors de la fenêtre visible (plafond API) : dire jusqu'où on voit.
             out["horizon"] = _max_time(flights, "dep_time")
         return out
->>>>>>> vision_dev
     except AirlabsError as e:
         return {"error": str(e)}
 
 
-<<<<<<< HEAD
-def get_arrivals(iata_code: str, limit: int = 20) -> dict:
-    """Return the scheduled arrivals board for an airport."""
-    try:
-        flights = _fetch_schedules(arr_iata=iata_code, limit=min(limit, 50))
-        return {"count": len(flights), "arrivals": [_pick(f, _SCHEDULE_KEYS) for f in flights]}
-=======
 def get_arrivals(iata_code: str, limit: int = 20, terminal: str = None,
                  origin: str = None, from_time: str = None) -> dict:
     """Return upcoming arrivals for an airport, optionally filtered by terminal,
@@ -524,7 +487,6 @@ def get_arrivals(iata_code: str, limit: int = 20, terminal: str = None,
         if from_time and not shown:
             out["horizon"] = _max_time(flights, "arr_time")
         return out
->>>>>>> vision_dev
     except AirlabsError as e:
         return {"error": str(e)}
 
@@ -627,12 +589,8 @@ TOOLS = [
             "description": (
                 "Get the scheduled departure board for an airport: flight numbers, "
                 "airlines, destinations, departure times, terminals, gates, and status. "
-<<<<<<< HEAD
-                "Use when the user asks 'what flights depart from X' or 'show me the departure board'."
-=======
                 "Use when the user asks 'what flights depart from X' or 'show me the departure board'. "
                 "Pass 'terminal' to only return departures from a specific terminal (e.g. '2F')."
->>>>>>> vision_dev
             ),
             "parameters": {
                 "type": "object",
@@ -645,8 +603,6 @@ TOOLS = [
                         "type": "integer",
                         "description": "Maximum number of flights to return (default 20, max 50).",
                     },
-<<<<<<< HEAD
-=======
                     "terminal": {
                         "type": "string",
                         "description": "Optional terminal filter, e.g. '2F', '2E', '1'. Omit for all terminals.",
@@ -659,7 +615,6 @@ TOOLS = [
                         "type": "string",
                         "description": "Optional start time 'HH:MM' (e.g. '14:00'). Only returns flights departing at or after this time today.",
                     },
->>>>>>> vision_dev
                 },
                 "required": ["iata_code"],
                 "additionalProperties": False,
@@ -673,12 +628,8 @@ TOOLS = [
             "description": (
                 "Get the scheduled arrivals board for an airport: flight numbers, "
                 "airlines, origin airports, arrival times, terminals, and status. "
-<<<<<<< HEAD
-                "Use when the user asks 'what flights arrive at X' or 'show me the arrivals board'."
-=======
                 "Use when the user asks 'what flights arrive at X' or 'show me the arrivals board'. "
                 "Pass 'terminal' to only return arrivals at a specific terminal (e.g. '2F')."
->>>>>>> vision_dev
             ),
             "parameters": {
                 "type": "object",
@@ -691,8 +642,6 @@ TOOLS = [
                         "type": "integer",
                         "description": "Maximum number of flights to return (default 20, max 50).",
                     },
-<<<<<<< HEAD
-=======
                     "terminal": {
                         "type": "string",
                         "description": "Optional terminal filter, e.g. '2F', '2E', '1'. Omit for all terminals.",
@@ -705,7 +654,6 @@ TOOLS = [
                         "type": "string",
                         "description": "Optional start time 'HH:MM' (e.g. '14:00'). Only returns flights arriving at or after this time today.",
                     },
->>>>>>> vision_dev
                 },
                 "required": ["iata_code"],
                 "additionalProperties": False,

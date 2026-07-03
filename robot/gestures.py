@@ -2,15 +2,12 @@ import time
 import threading
 import robot.hardware as hardware
 
-<<<<<<< HEAD
-=======
 try:
     from robot import hand_idle
     _HAND_IDLE_AVAILABLE = True
 except Exception:
     _HAND_IDLE_AVAILABLE = False
 
->>>>>>> vision_dev
 _release_event = threading.Event()
 
 ACTION_MAP = {
@@ -23,10 +20,7 @@ ACTION_MAP = {
     'bisou_gauche':      12,
     'bisou_droit':       13,
     'bisou_deux_mains':  11,
-<<<<<<< HEAD
-=======
     'coeur':             20,
->>>>>>> vision_dev
     'coeur_droit':       21,
     'mains_levees':      15,
     'main_droite_levee': 23,
@@ -66,11 +60,7 @@ def execute_gesture(geste: str):
         arm_client.ExecuteAction(code)
         if geste == 'mains_levees':
             print('[GESTE] En attente de relacher_bras()...')
-<<<<<<< HEAD
-            _release_event.wait()
-=======
             _release_event.wait(timeout=60)
->>>>>>> vision_dev
         else:
             time.sleep(2)
         arm_client.ExecuteAction(RESET_CODE)

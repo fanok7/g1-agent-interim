@@ -4,33 +4,19 @@ import json
 import httpx
 from tools.registry import register
 
-<<<<<<< HEAD
-_BASE_URL = "http://192.168.0.121:8000"
-
-
-def _get(path: str, params: dict = None) -> dict:
-    with httpx.Client(timeout=10.0) as client:
-        response = client.get(f"{_BASE_URL}{path}", params=params or {})
-=======
 _BASE_URL = "http://10.75.1.20:8001"
 _client   = httpx.Client(timeout=10.0, base_url=_BASE_URL)
 
 
 def _get(path: str, params: dict = None) -> dict:
     response = _client.get(path, params=params or {})
->>>>>>> vision_dev
     if not response.is_success:
         raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
     return response.json()
 
 
 def _post(path: str, body: dict) -> dict:
-<<<<<<< HEAD
-    with httpx.Client(timeout=10.0) as client:
-        response = client.post(f"{_BASE_URL}{path}", json=body)
-=======
     response = _client.post(path, json=body)
->>>>>>> vision_dev
     if not response.is_success:
         raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
     return response.json()

@@ -17,15 +17,6 @@ from robot import hand_idle
 from robot.gestures import execute_gesture
 
 # Chargement des tools — l'import suffit à les enregistrer dans le registry
-<<<<<<< HEAD
-import tools.web_search    # noqa: F401
-import tools.database      # noqa: F401
-import tools.gesture_tool  # noqa: F401
-import tools.gmail         # noqa: F401
-import tools.airlabs_tools   # noqa: F401
-import tools.transport_tools   # noqa: F401
-import tools.googlemaps_tools  # noqa: F401
-=======
 import tools.web_search       # noqa: F401
 #import tools.database         # noqa: F401
 import tools.gesture_tool     # noqa: F401
@@ -43,7 +34,6 @@ import tools.datetime_tool    # noqa: F401
 import tools.calendar_tool    # noqa: F401
 #import tools.qr_tool          # noqa: F401
 from tools.screenshot_tool import SCREENSHOT_DIR
->>>>>>> vision_dev
 
 from agent.parler_client import send_emotion
 from agent.session import connect
@@ -150,9 +140,6 @@ async def run():
     try:
         await asyncio.gather(
             send_audio_loop(ws),
-<<<<<<< HEAD
-            receive_events_loop(ws)
-=======
             receive_events_loop(ws),
             face_greeting_loop(ws),
             rps_result_loop(ws),
@@ -166,7 +153,6 @@ async def run():
             #_supervise(VISION_FIRE_SCRIPT, "fire_detection", PYTHON38,
             #           ["-c", VISION_FIRE_CONFIG]),
             _gesture_cmd_loop(),
->>>>>>> vision_dev
         )
     finally:
         await ws.close()
