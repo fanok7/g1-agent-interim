@@ -39,7 +39,7 @@ def _handler(side: str = 'left') -> str:
     def _run():
         _running.set()
         try:
-            from main.shake_hand import run_shake_hand
+            from robot.shake_hand import run_shake_hand
             run_shake_hand(
                 side=side,
                 on_event=lambda evt: event_queue.put(evt)

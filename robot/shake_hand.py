@@ -9,7 +9,7 @@ Lancement standalone :
     python3.8 -c "
     import sys; sys.path.insert(0, '/home/unitree/g1_agent_interim')
     import robot.hardware as hw; hw.init()
-    from main.shake_hand import run_shake_hand
+    from robot.shake_hand import run_shake_hand
     run_shake_hand()
     "
 """
@@ -17,7 +17,7 @@ Lancement standalone :
 import time
 import logging
 
-from main.hand_control import HandControl
+from robot.hand_control import HandControl
 
 try:
     from robot import hand_idle

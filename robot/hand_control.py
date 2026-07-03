@@ -5,7 +5,7 @@ Toutes les fonctions Modbus sont ici — les scripts de plus haut niveau
 (shake_hand.py, finger_control.py…) importent depuis ce module.
 
 Usage :
-    from main.hand_control import HandControl
+    from robot.hand_control import HandControl
 
     hand = HandControl('left')
     hand.connect()
