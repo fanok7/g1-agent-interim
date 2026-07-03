@@ -159,8 +159,3 @@ g1_agent_interim/
     └── rps/                 # Mini-jeu Pierre Feuille Ciseaux
 ```
 
----
-
-## Documentation complète
-
-Architecture détaillée, hardware, réseau, IPC, tous les tools et le guide de diagnostic : **[CLAUDE.md](CLAUDE.md)**.
