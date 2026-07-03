@@ -1,150 +1,88 @@
 """
-tools/vision_tool.py - Tool "voir" pour l'agent G1
-
-Se connecte au vision_server.py (socket 127.0.0.1:9997) et expose deux fonctions :
-  - get_vision_context() → résumé textuel de ce que le robot voit (pour le system prompt)
-  - Le tool "voir" appelable par l'agent via Realtime API
-
-Enregistrement automatique dans le registry à l'import (comme gesture_tool.py).
+vision_tool.py — Tool "ce_que_je_vois"
+=======================================
+Lit /tmp/vision_state.json  (objets YOLO, écrit par vision_server.py)
+et /tmp/face_id_state.json  (visages InsightFace, écrit par face_id.py)
+et retourne un résumé de ce que le robot voit.
 """
 
 import json
-import socket
-import threading
 import time
+from tools.registry import register
 
-# ── État partagé ─────────────────────────────────────────────────────────────
-_lock         = threading.Lock()
-_last_objects = []     # liste de dicts {"label","conf","dist","x","y"}
-_connected    = False
-VISION_PORT   = 9997
-
-# ── Connexion background ──────────────────────────────────────────────────────
-
-def _connect_loop():
-    global _connected, _last_objects
-
-    while True:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect(('127.0.0.1', VISION_PORT))
-            sock.settimeout(None)
-            _connected = True
-            print(f"[VisionTool] Connecté au vision_server (port {VISION_PORT})")
-
-            buf = ""
-            while True:
-                chunk = sock.recv(4096).decode(errors='ignore')
-                if not chunk:
-                    break
-                buf += chunk
-                while '\n' in buf:
-                    line, buf = buf.split('\n', 1)
-                    line = line.strip()
-                    if line:
-                        try:
-                            data = json.loads(line)
-                            with _lock:
-                                _last_objects = data.get("objects", [])
-                        except Exception:
-                            pass
-
-        except Exception as e:
-            _connected = False
-            print(f"[VisionTool] vision_server non dispo, retry dans 3s ({e})")
-            time.sleep(3)
+VISION_FILE  = "/tmp/vision_state.json"
+FACE_FILE    = "/tmp/face_id_state.json"
+VISION_STALE = 15.0
+FACE_STALE   = 10.0
 
 
-threading.Thread(target=_connect_loop, daemon=True).start()
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def get_vision_context() -> str:
-    """
-    Renvoie un résumé textuel de ce que le robot voit.
-    Utilisé pour enrichir le contexte de chaque échange.
-    Exemple : "Devant toi : 1 personne à 1.2m, 1 chaise à 2.5m."
-    """
-    with _lock:
-        objects = list(_last_objects)
-
-    if not objects:
-        if not _connected:
-            return ""   # vision_server pas lancé → on n'injecte rien
-        return "Rien de détecté devant toi."
-
-    parts = []
-    for o in objects:
-        label = o.get("label", "objet")
-        dist  = o.get("dist", -1)
-        if dist and dist > 0:
-            parts.append(f"{label} à {dist:.1f}m")
-        else:
-            parts.append(label)
-
-    return "Devant toi : " + ", ".join(parts) + "."
-
-
-def get_objects_list():
-    """Retourne la liste brute des objets détectés."""
-    with _lock:
-        return list(_last_objects)
-
-
-# ── Définition du tool Realtime OpenAI ───────────────────────────────────────
-
-TOOL_DEFINITION = {
-    "type": "function",
-    "name": "voir",
-    "description": (
-        "Regarde ce qu'il y a devant toi grâce à ta caméra. "
-        "Retourne la liste des objets/personnes détectés et leur distance. "
-        "Appelle ce tool quand on te demande ce que tu vois, "
-        "qui est devant toi, ou si tu as besoin d'une info visuelle."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {},
-        "required": [],
-    },
-}
-
-
-def handle_voir(_args: dict) -> str:
-    """Exécute le tool 'voir' et retourne le résultat en texte."""
-    with _lock:
-        objects = list(_last_objects)
-
-    if not _connected:
-        return "Ma caméra n'est pas disponible pour l'instant."
-
-    if not objects:
-        return "Je ne détecte rien de particulier devant moi."
-
+def _handler(**_kwargs):
+    now = time.time()
     lines = []
-    for o in objects:
-        label = o.get("label", "objet")
-        conf  = o.get("conf", 0)
-        dist  = o.get("dist", -1)
-        if dist and dist > 0:
-            lines.append(f"- {label} (confiance {int(conf*100)}%) à {dist:.1f} mètre(s)")
+    has_known_faces = False
+
+    # ── Personnes reconnues (InsightFace) — annoncées EN PREMIER ────────────────
+    try:
+        with open(FACE_FILE) as f:
+            fs = json.load(f)
+        if now - fs.get("ts", 0) < FACE_STALE:
+            faces = fs.get("faces", [])
+            known   = [f["name"] for f in faces if f.get("name") != "Inconnu"]
+            unknown = sum(1 for f in faces if f.get("name") == "Inconnu")
+            has_known_faces = bool(known)
+            if known:
+                noms = ", ".join(known)
+                extra = f" (et {unknown} inconnu(s))" if unknown else ""
+                lines.append(f"Personnes reconnues, dis bien leur prénom : {noms}{extra}.")
+            elif unknown:
+                lines.append(f"{unknown} personne(s) non reconnue(s) devant la caméra.")
+    except FileNotFoundError:
+        pass   # face_id subprocess pas encore lancé, on ne le mentionne pas
+    except Exception as e:
+        lines.append(f"Erreur lecture face_id : {e}")
+
+    # ── Objets YOLO ────────────────────────────────────────────────────────────
+    try:
+        with open(VISION_FILE) as f:
+            vs = json.load(f)
+        if now - vs.get("ts", 0) < VISION_STALE:
+            objects = vs.get("objects", [])
+            if objects:
+                parts = []
+                for o in objects:
+                    label = o.get("label", "objet")
+                    # Ne pas répéter "person" si la personne est déjà identifiée par son prénom.
+                    if label == "person" and has_known_faces:
+                        continue
+                    parts.append(label)
+                if parts:
+                    lines.append("Objets détectés : " + ", ".join(parts) + ".")
+            else:
+                lines.append("Aucun objet détecté par la caméra.")
         else:
-            lines.append(f"- {label} (confiance {int(conf*100)}%)")
+            lines.append("Données caméra périmées (vision_server inactif ?).")
+    except FileNotFoundError:
+        lines.append("vision_server non démarré — pas de données YOLO.")
+    except Exception as e:
+        lines.append(f"Erreur lecture vision : {e}")
 
-    return "Voici ce que je vois :\n" + "\n".join(lines)
+    return "\n".join(lines) if lines else "Je ne vois rien pour l'instant."
 
 
-# ── Enregistrement dans le registry de l'agent ───────────────────────────────
-# Même pattern que gesture_tool.py — l'import de ce fichier suffit.
-
-try:
-    from agent.registry import register_tool
-    register_tool(
-        definition=TOOL_DEFINITION,
-        handler=handle_voir,
-    )
-    print("[VisionTool] Tool 'voir' enregistré dans le registry agent.")
-except ImportError:
-    # Standalone (test direct)
-    print("[VisionTool] registry non disponible (mode standalone)")
+register(
+    {
+        "name": "ce_que_je_vois",
+        "description": (
+            "Retourne ce que la caméra voit à l'instant : objets détectés et personnes reconnues. "
+            "Appelle ce tool pour toute question visuelle : 'qu'est-ce que tu vois ?', "
+            "'il y a quelqu'un ?', 'tu vois mon sac ?', 'la zone est dégagée ?'. "
+            "Appelle-le à chaque question — les données changent en temps réel."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    _handler,
+)

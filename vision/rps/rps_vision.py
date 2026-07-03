@@ -19,6 +19,7 @@ import cv2
 import threading
 import time
 import argparse
+import numpy as np
 from collections import Counter
 from ultralytics import YOLO
 
@@ -44,12 +45,26 @@ class RPSVision:
         self._frame        = None
         self._model        = None
         self._model_ready  = threading.Event()
+        self._preloading   = False
+        self._clear_req    = threading.Event()
 
     def preload(self):
         """Charge le modèle YOLO en avance (appeler pendant prepare())."""
-        self._model = YOLO(self.model_path)
+        self._preloading = True
+        model = YOLO(self.model_path)
+        # Warm-up : la 1re inférence initialise CUDA/TensorRT (plusieurs secondes)
+        model(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, verbose=False)
+        self._model = model
         self._model_ready.set()
-        print(f"[RPS] Modèle prêt : {list(self._model.names.values())}")
+        print(f"[RPS] Modèle prêt : {list(model.names.values())}")
+
+    def reset(self):
+        """Purge le geste stable et le buffer — à appeler à la révélation pour
+        ignorer les détections faites pendant le compte à rebours."""
+        self._clear_req.set()
+        with self._lock:
+            self._gesture = None
+            self._raw     = None
 
     def start(self):
         self._running = True
@@ -85,6 +100,9 @@ class RPSVision:
         return None
 
     def _loop(self):
+        if self._preloading:
+            # preload() en cours dans un autre thread — ne pas charger en double
+            self._model_ready.wait(timeout=30.0)
         if self._model is None:
             self._model = YOLO(self.model_path)
             self._model_ready.set()
@@ -112,12 +130,14 @@ class RPSVision:
 
             frame_idx += 1
 
-            if frame_idx % SKIP == 0:
-                h0, w0 = frame.shape[:2]
-                small  = cv2.resize(frame, (320, int(h0*320/w0)))
-                sx, sy = w0/320, h0/int(h0*320/w0)
+            if self._clear_req.is_set():
+                gesture_buf.clear()
+                self._clear_req.clear()
 
-                results  = model(small, imgsz=320, verbose=False,
+            if frame_idx % SKIP == 0:
+                # Frame native : le moteur TensorRT a une entrée fixe 640x640,
+                # réduire à 320 divisait la résolution utile par deux
+                results  = model(frame, imgsz=640, verbose=False,
                                  conf=self.conf)
                 last_res = []
                 for r in results:
@@ -125,7 +145,6 @@ class RPSVision:
                     for box, cls, c in zip(r.boxes.xyxy.cpu().numpy(),
                                            r.boxes.cls.cpu().numpy(),
                                            r.boxes.conf.cpu().numpy()):
-                        box[[0,2]] *= sx; box[[1,3]] *= sy
                         last_res.append((box.copy(),
                                          model.names[int(cls)], float(c)))
 

@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 """
-vision/vision_server.py - A lancer sur le robot G1 (miniconda python3)
-Stream caméra RealSense D435i avec détection YOLO26 + distance.
+vision/vision_server.py — Détection YOLO sur 2 caméras en parallèle.
 
-- HTTP MJPEG  : http://192.168.123.164:8080
-- Socket 9997 : envoie les détections à l'agent (g1_chat via vision_tool)
+Threads :
+  _capture_rs_loop  : lit RealSense (D435i) en continu        → _raw_rs
+  _yolo_ugreen_loop : YOLO toutes les 2s sur frame UGREEN      → _dets_ugreen
+                      (lit /tmp/latest_ugreen.jpg fourni par face_id.py)
+  _yolo_rs_loop     : YOLO toutes les 2s sur RealSense         → _dets_realsense
+  _merge_loop       : fusionne les 2 listes, écrit vision_state.json
 
-Format socket → JSON : {"objects": [{"label":"person","conf":0.95,"dist":1.2,"x":320,"y":240}]}
+IPC fichiers :
+  /tmp/latest_ugreen.jpg   → frame UGREEN écrite par face_id.py (lecture seule ici)
+  /tmp/vision_state.json   → {"objects":[{label,conf,x,y,cam}], "ts":…}
+  /tmp/vision_pause        → RPS game : stoppe la capture RealSense
 
-Lancement :
-    /home/unitree/miniconda3/bin/python3 /home/unitree/g1_agent_interim/vision/vision_server.py
+HTTP (port 8080) :
+  /stream            → MJPEG UGREEN annoté (relu depuis face_id)
+  /stream/realsense  → MJPEG RealSense annoté
+  /detections        → JSON détections courantes
 """
 
 import json
-import socket
+import os
 import threading
 import time
 
@@ -25,215 +33,347 @@ from ultralytics import YOLO
 try:
     import pyrealsense2 as rs
     USE_REALSENSE = True
-    print("[VISION] Mode RealSense D435i (RGB + depth)")
+    print("[VISION] RealSense D435i disponible")
 except ImportError:
     USE_REALSENSE = False
-    print("[VISION] pyrealsense2 absent → fallback webcam (pas de distance)")
+    print("[VISION] pyrealsense2 absent — YOLO RealSense désactivé")
+
+# RealSense : capture couleur uniquement (pas de YOLO RS — réservée au scan QR).
+# YOLO RS désactivé : le D435i décrochait en USB et spammait des erreurs.
+USE_REALSENSE = True
 
 # ── Config ────────────────────────────────────────────────────────────────────
-DEVICE_ID       = 4          # fallback webcam si pas de RealSense
+MODEL_PATH      = '/home/unitree/yolo26n.engine'
+UGREEN_FRAME    = '/tmp/latest_ugreen.jpg'    # fourni par face_id.py
+RS_FRAME        = '/tmp/latest_realsense.jpg' # fourni par _capture_rs_loop (partagé avec qr_tool)
+PAUSE_FILE      = '/tmp/vision_pause'
+STATE_FILE      = '/tmp/vision_state.json'
+QR_STATE_FILE   = '/tmp/qr_state.json'
+QR_INTERVAL     = 1.0    # secondes entre deux tentatives de scan
+QR_COOLDOWN     = 30.0   # secondes avant de re-signaler le même code
+UV_BIN          = '/home/unitree/.local/bin/uv'
+QR_REPO         = '/home/unitree/QR_scan_tool'
 HTTP_PORT       = 8080
-SOCKET_PORT     = 9997       # port écouté par vision_tool.py dans l'agent
 WIDTH, HEIGHT   = 640, 480
+CONFIDENCE      = 0.50
+YOLO_INTERVAL   = 2.0
+MAX_OBJECTS     = 5
 QUALITY         = 75
-CONFIDENCE      = 0.45
-YOLO_SKIP       = 3          # YOLO 1 frame sur N (charge CPU/GPU)
-PUBLISH_EVERY   = 1.0        # secondes entre deux publications socket
-MAX_OBJECTS     = 5          # max objets remontés à l'agent
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 app   = Flask(__name__)
-model = YOLO('/home/unitree/yolo26n.pt')
+model = YOLO(MODEL_PATH)
 
-# État partagé thread-safe
-_lock          = threading.Lock()
-_last_frame    = None
-_last_dets     = []   # [{"label":…,"conf":…,"dist":…,"x":…,"y":…}]
-_subscribers   = []   # sockets connectés (vision_tool)
+_lock           = threading.Lock()
+_dets_ugreen    = []
+_dets_realsense = []
+_ann_ugreen     = None   # frame UGREEN annotée (pour HTTP stream)
+_ann_realsense  = None   # frame RealSense annotée (pour HTTP stream)
+_raw_rs         = None   # dernière frame RealSense brute
 
-# ── Initialisation caméra ─────────────────────────────────────────────────────
 
-def _init_realsense():
-    pipe   = rs.pipeline()
-    cfg    = rs.config()
-    cfg.enable_stream(rs.stream.color, WIDTH, HEIGHT, rs.format.bgr8, 30)
-    cfg.enable_stream(rs.stream.depth, WIDTH, HEIGHT, rs.format.z16,  30)
-    pipe.start(cfg)
-    align  = rs.align(rs.stream.color)
-    return pipe, align
+# ── Écriture atomique ─────────────────────────────────────────────────────────
 
-def _init_webcam():
-    for idx in [DEVICE_ID, 0, 1, 2, 3, 5, 6]:
-        cap = cv2.VideoCapture(idx)
-        ret, frm = cap.read()
-        if cap.isOpened() and ret and len(frm.shape) == 3:
-            b, g, _ = cv2.split(frm)
-            if cv2.countNonZero(cv2.absdiff(b, g)) > 1000:
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH,  WIDTH)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, HEIGHT)
-                print(f"[VISION] Webcam /dev/video{idx}")
-                return cap
-        cap.release()
-    raise RuntimeError("Aucune caméra RGB disponible")
+def _write_state(dets):
+    try:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"objects": dets, "ts": time.time()}, f)
+        os.replace(tmp, STATE_FILE)
+    except Exception as e:
+        print(f"[VISION] Erreur écriture état : {e}")
 
-# ── Thread capture + détection ────────────────────────────────────────────────
 
-def _capture_loop():
-    global _last_frame, _last_dets
+# ── Fusion des deux caméras ───────────────────────────────────────────────────
 
-    if USE_REALSENSE:
-        pipe, align = _init_realsense()
-    else:
-        cap = _init_webcam()
+def _merge_and_write():
+    """Fusionne UGREEN + RealSense, trie par confiance, écrit le fichier JSON."""
+    with _lock:
+        all_dets = list(_dets_ugreen) + list(_dets_realsense)
+    all_dets.sort(key=lambda d: d["conf"], reverse=True)
+    _write_state(all_dets[:MAX_OBJECTS])
 
-    frame_count = 0
+
+# ── Thread YOLO UGREEN ────────────────────────────────────────────────────────
+
+def _yolo_ugreen_loop():
+    """YOLO sur la caméra UGREEN. Lit les frames depuis /tmp/latest_ugreen.jpg
+    (écrit par face_id.py) — aucune ouverture directe de /dev/video0."""
+    global _dets_ugreen, _ann_ugreen
+    print("[YOLO-UGREEN] Démarré", flush=True)
 
     while True:
+        time.sleep(YOLO_INTERVAL)
+        if os.path.exists(PAUSE_FILE):
+            continue
+        if not os.path.exists(UGREEN_FRAME):
+            # face_id.py pas encore démarré : vider SEULEMENT les détections UGREEN,
+            # puis re-fusionner — surtout NE PAS faire _write_state([]) qui écraserait
+            # les détections RealSense toutes les 2s (clignotement de la vision).
+            with _lock:
+                _dets_ugreen = []
+            _merge_and_write()
+            continue
         try:
-            if USE_REALSENSE:
-                frames   = pipe.wait_for_frames(timeout_ms=5000)
-                aligned  = align.process(frames)
-                color_f  = aligned.get_color_frame()
-                depth_f  = aligned.get_depth_frame()
-                if not color_f or not depth_f:
-                    continue
-                frame = np.asanyarray(color_f.get_data())
-                depth = depth_f   # on garde le frame RS pour get_distance
-            else:
-                ret, frame = cap.read()
-                if not ret:
-                    time.sleep(0.5)
-                    cap = _init_webcam()
-                    continue
-                depth = None
+            frame = cv2.imread(UGREEN_FRAME)
+            if frame is None:
+                continue
 
-            dets = []
-            annotated = frame.copy()
+            results = model(frame, conf=CONFIDENCE, verbose=False)
+            r       = results[0]
+            ann     = r.plot()
+            dets    = []
 
-            if frame_count % YOLO_SKIP == 0:
-                results = model(frame, conf=CONFIDENCE, verbose=False)
-                r       = results[0]
-                annotated = r.plot()
-
-                if r.boxes is not None:
-                    for box in r.boxes:
-                        cls  = int(box.cls[0])
-                        conf = float(box.conf[0])
-                        x1, y1, x2, y2 = map(int, box.xyxy[0])
-                        cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-
-                        if USE_REALSENSE and depth:
-                            dist = round(depth.get_distance(
-                                min(cx, WIDTH - 1), min(cy, HEIGHT - 1)
-                            ), 2)
-                        else:
-                            dist = -1.0   # inconnue
-
-                        dets.append({
-                            "label": model.names[cls],
-                            "conf":  round(conf, 2),
-                            "dist":  dist,
-                            "x":     cx,
-                            "y":     cy,
-                        })
-
-                # Trier par confiance décroissante, limiter
-                dets.sort(key=lambda d: d["conf"], reverse=True)
-                dets = dets[:MAX_OBJECTS]
+            if r.boxes is not None:
+                for box in r.boxes:
+                    cls  = int(box.cls[0])
+                    conf = float(box.conf[0])
+                    x1, y1, x2, y2 = map(int, box.xyxy[0])
+                    dets.append({
+                        "label": model.names[cls],
+                        "conf":  round(conf, 2),
+                        "x":     (x1 + x2) // 2,
+                        "y":     (y1 + y2) // 2,
+                        "cam":   "ugreen",
+                    })
 
             with _lock:
-                _last_frame = annotated
-                if frame_count % YOLO_SKIP == 0:
-                    _last_dets = dets
+                _dets_ugreen = dets
+                _ann_ugreen  = ann
 
-            frame_count += 1
+            _merge_and_write()
+            print(f"[YOLO-UGREEN] {len(dets)} objet(s)", flush=True)
 
         except Exception as e:
-            print(f"[VISION] Erreur capture : {e}")
-            time.sleep(1)
+            print(f"[YOLO-UGREEN] Erreur : {e}", flush=True)
+            with _lock:
+                _dets_ugreen = []
+            _merge_and_write()
 
 
-# ── Thread publication socket ─────────────────────────────────────────────────
+# ── Thread capture RealSense ──────────────────────────────────────────────────
 
-def _publish_loop():
-    """Serveur socket : accepte des clients (vision_tool) et leur envoie les dets."""
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(('127.0.0.1', SOCKET_PORT))
-    srv.listen(5)
-    print(f"[VISION] Socket pub sur 127.0.0.1:{SOCKET_PORT}")
+def _capture_rs_loop():
+    """Capture RealSense en continu → /tmp/latest_realsense.jpg (partagé avec qr_tool).
+    Pas de YOLO sur la RealSense — réservée au scan QR à la demande."""
+    global _raw_rs
+    if not USE_REALSENSE:
+        return
 
-    def _handle(conn):
+    # Auto-détection du premier device RealSense disponible
+    pipe = None
+    for attempt in range(10):
         try:
-            while True:
-                with _lock:
-                    dets = list(_last_dets)
-                payload = json.dumps({"objects": dets}) + '\n'
-                conn.sendall(payload.encode())
-                time.sleep(PUBLISH_EVERY)
-        except Exception:
-            pass
-        finally:
-            conn.close()
+            ctx     = rs.context()
+            devices = ctx.query_devices()
+            if len(devices) == 0:
+                raise RuntimeError("aucun device RealSense détecté")
+            serial = devices[0].get_info(rs.camera_info.serial_number)
+            p   = rs.pipeline()
+            cfg = rs.config()
+            cfg.enable_device(serial)
+            cfg.enable_stream(rs.stream.color, WIDTH, HEIGHT, rs.format.bgr8, 30)
+            p.start(cfg)
+            pipe = p
+            print(f"[RS-CAPTURE] RealSense {serial} démarrée", flush=True)
+            break
+        except Exception as e:
+            if attempt < 9:
+                print(f"[RS-CAPTURE] Tentative {attempt+1}/10 ({e}) — retry 5s", flush=True)
+                time.sleep(5)
+            else:
+                print("[RS-CAPTURE] RealSense indisponible", flush=True)
+                return
+
+    _timeout_streak = 0
 
     while True:
         try:
-            conn, _ = srv.accept()
-            threading.Thread(target=_handle, args=(conn,), daemon=True).start()
+            if os.path.exists(PAUSE_FILE):
+                time.sleep(0.3)
+                continue
+            frames  = pipe.wait_for_frames(timeout_ms=5000)
+            color_f = frames.get_color_frame()
+            if not color_f:
+                continue
+            _timeout_streak = 0
+            frame = np.asanyarray(color_f.get_data())
+            with _lock:
+                _raw_rs = frame
+            # Écriture atomique du fichier partagé (lu par qr_tool et le stream HTTP)
+            tmp = RS_FRAME.replace(".jpg", "_tmp.jpg")
+            cv2.imwrite(tmp, frame, [cv2.IMWRITE_JPEG_QUALITY, QUALITY])
+            os.replace(tmp, RS_FRAME)
         except Exception as e:
-            print(f"[VISION] Erreur serveur socket : {e}")
+            print(f"[RS-CAPTURE] Erreur : {e}", flush=True)
+            _timeout_streak += 1
+            if _timeout_streak >= 3:
+                # 3 timeouts consécutifs → hardware_reset et reprise
+                print("[RS-CAPTURE] 3 timeouts — hardware_reset...", flush=True)
+                try:
+                    pipe.stop()
+                    ctx2 = rs.context()
+                    devs = ctx2.query_devices()
+                    if len(devs) > 0:
+                        devs[0].hardware_reset()
+                    time.sleep(4)
+                    pipe.start(cfg)
+                    print("[RS-CAPTURE] Reprise après reset", flush=True)
+                except Exception as re:
+                    print(f"[RS-CAPTURE] Reset échoué ({re}) — retry 5s", flush=True)
+                    time.sleep(5)
+                _timeout_streak = 0
+            else:
+                time.sleep(1)
+
+
+def _yolo_rs_loop():
+    """YOLO RealSense désactivé — RealSense réservée au scan QR."""
+    return
+
+
+# ── Thread QR passif (RealSense) ─────────────────────────────────────────────
+
+_DECODE_SCRIPT = (
+    "import sys; sys.path.insert(0, '{repo}'); from scanner import scan_image; "
+    "r = scan_image(sys.argv[1]); print(r if r else '__NONE__')"
+)
+
+def _qr_scan_loop():
+    """Scan QR/PDF417/Aztec en continu sur la frame RealSense partagée.
+    Utilise uv+zxingcpp pour supporter l'Aztec (billets Air France/KLM)."""
+    import subprocess
+    print("[QR] Thread passif démarré (QR+PDF417+Aztec via zxingcpp)", flush=True)
+    _last_raw   = None
+    _last_alert = 0.0
+    _last_mtime = None
+
+    while True:
+        time.sleep(QR_INTERVAL)
+        if not os.path.exists(RS_FRAME):
+            continue
+        try:
+            mtime = os.path.getmtime(RS_FRAME)
+        except OSError:
+            continue
+        if mtime == _last_mtime:
+            continue
+        _last_mtime = mtime
+        try:
+            out = subprocess.check_output(
+                [UV_BIN, "run", "--project", QR_REPO, "python", "-c",
+                 _DECODE_SCRIPT.format(repo=QR_REPO), RS_FRAME],
+                stderr=subprocess.DEVNULL, timeout=4,
+            ).decode().strip()
+            raw = None if out == "__NONE__" else out
+        except Exception:
+            continue
+
+        if not raw:
+            continue
+
+        now = time.time()
+        if raw == _last_raw and (now - _last_alert) < QR_COOLDOWN:
+            continue
+        _last_raw   = raw
+        _last_alert = now
+
+        # Parse BCBP
+        info = {"raw": raw, "ts": now}
+        if raw.startswith("M"):
+            try:
+                nom_brut  = raw[2:22].strip()
+                pnr       = raw[23:30].strip()
+                depart    = raw[30:33].strip()
+                arrivee   = raw[33:36].strip()
+                compagnie = raw[36:39].strip()
+                vol       = raw[39:44].strip()
+                if "/" in nom_brut:
+                    n, p = nom_brut.split("/", 1)
+                    nom = "{} {}".format(p.strip().title(), n.strip().title())
+                else:
+                    nom = nom_brut.title()
+                info = {"passager": nom, "pnr": pnr,
+                        "vol": "{}{}".format(compagnie.strip(), vol.strip()),
+                        "de": depart, "vers": arrivee, "raw": raw, "ts": now}
+            except Exception:
+                pass
+
+        tmp = QR_STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(info, f, ensure_ascii=False)
+        os.replace(tmp, QR_STATE_FILE)
+        print("[QR] Billet détecté : {} {}".format(
+            info.get("passager", "?"), info.get("vol", "")), flush=True)
 
 
 # ── HTTP MJPEG ────────────────────────────────────────────────────────────────
 
-def _generate_mjpeg():
+def _gen_ugreen():
     while True:
         with _lock:
-            frame = _last_frame
-
+            frame = _ann_ugreen
+        if frame is None:
+            # Fallback : servir la dernière frame UGREEN brute
+            raw = cv2.imread(UGREEN_FRAME) if os.path.exists(UGREEN_FRAME) else None
+            frame = raw
         if frame is None:
             time.sleep(0.05)
             continue
-
         _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, QUALITY])
-        yield (
-            b'--frame\r\n'
-            b'Content-Type: image/jpeg\r\n\r\n'
-            + buf.tobytes()
-            + b'\r\n'
-        )
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
+               + buf.tobytes() + b'\r\n')
+
+
+def _gen_realsense():
+    """Stream RealSense brut (depuis /tmp/latest_realsense.jpg partagé)."""
+    while True:
+        if os.path.exists(RS_FRAME):
+            raw = cv2.imread(RS_FRAME)
+            if raw is not None:
+                _, buf = cv2.imencode('.jpg', raw, [cv2.IMWRITE_JPEG_QUALITY, QUALITY])
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
+                       + buf.tobytes() + b'\r\n')
+                continue
+        time.sleep(0.05)
 
 
 @app.route('/')
 def index():
-    return '''<html><head><title>G1 Vision</title>
-    <style>body{background:#111;display:flex;flex-direction:column;align-items:center;
-    justify-content:center;height:100vh;margin:0;gap:12px;}
-    h1{color:white;font-family:monospace;}img{border:2px solid #444;max-width:100%;}</style>
-    </head><body><h1>Unitree G1 — Vision YOLO26 + RealSense</h1>
-    <img src="/stream"></body></html>'''
-
+    rs_link = '<a href="/stream/realsense" style="color:#aaa">RealSense</a>' if USE_REALSENSE else ''
+    return f'''<html><head><title>G1 Vision</title>
+    <style>body{{background:#111;display:flex;align-items:center;justify-content:center;
+    height:100vh;margin:0;flex-direction:column;gap:12px;}}
+    h1{{color:white;font-family:monospace;}}img{{border:2px solid #444;max-width:48%;}}
+    .row{{display:flex;gap:12px;}}</style></head>
+    <body><h1>Unitree G1 — YOLO dual-cam</h1>
+    <div class="row"><img src="/stream"><img src="/stream/realsense"></div>
+    </body></html>'''
 
 @app.route('/stream')
-def stream():
-    return Response(_generate_mjpeg(),
+def stream_ugreen():
+    return Response(_gen_ugreen(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/stream/realsense')
+def stream_realsense():
+    return Response(_gen_realsense(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/detections')
 def detections():
-    """Endpoint JSON : état courant des détections."""
     with _lock:
-        dets = list(_last_dets)
-    return {"objects": dets}
+        return {"objects": list(_dets_ugreen) + list(_dets_realsense)}
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
-    threading.Thread(target=_capture_loop, daemon=True).start()
-    threading.Thread(target=_publish_loop, daemon=True).start()
-
-    print(f"[VISION] Stream HTTP  → http://192.168.123.164:{HTTP_PORT}")
-    print(f"[VISION] Socket agent → 127.0.0.1:{SOCKET_PORT}")
+    threading.Thread(target=_yolo_ugreen_loop, daemon=True).start()
+    threading.Thread(target=_capture_rs_loop,  daemon=True).start()
+    threading.Thread(target=_yolo_rs_loop,     daemon=True).start()
+    threading.Thread(target=_qr_scan_loop,     daemon=True).start()
+    print(f"[VISION] Stream UGREEN     → http://192.168.123.164:{HTTP_PORT}/stream")
+    print(f"[VISION] Stream RealSense  → http://192.168.123.164:{HTTP_PORT}/stream/realsense")
+    print(f"[VISION] Détections JSON   → http://192.168.123.164:{HTTP_PORT}/detections")
     app.run(host='0.0.0.0', port=HTTP_PORT, threaded=True)

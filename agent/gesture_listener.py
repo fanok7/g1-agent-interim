@@ -23,6 +23,7 @@ Intégration dans le system prompt (agent/session.py, juste avant l'envoi) :
 import socket
 import threading
 import time
+from typing import Optional
 
 # ── Config ────────────────────────────────────────────────────────────────────
 AGENT_GESTURE_PORT = 9998
@@ -82,7 +83,7 @@ def start():
     threading.Thread(target=_listen_loop, daemon=True).start()
 
 
-def get_last_gesture() -> str | None:
+def get_last_gesture() -> Optional[str]:
     """Retourne le dernier geste détecté s'il date de moins de GESTURE_TIMEOUT s."""
     with _lock:
         if _last_gesture and (time.time() - _last_time) < GESTURE_TIMEOUT:

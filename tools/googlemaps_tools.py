@@ -4,7 +4,8 @@ import os
 from typing import Callable, List, Optional
 import httpx
 
-# Robot static position — Terminal 2F, CDG Roissy
+# Robot static position — Terminal 2F, CDG Roissy. Used as the default centre
+# for every location-biased tool (search, route origin…).
 ROBOT_LAT = 49.0052
 ROBOT_LNG = 2.5770
 
@@ -25,8 +26,11 @@ def _api_key() -> str:
 
 
 def _get(url: str, params: dict) -> dict:
-    with httpx.Client(timeout=10.0) as client:
-        response = client.get(url, params=params)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.get(url, params=params)
+    except httpx.HTTPError as e:
+        raise GoogleMapsError(f"network error: {e}")
     if not response.is_success:
         raise GoogleMapsError(f"HTTP {response.status_code}: {response.text[:200]}")
     data = response.json()
@@ -41,8 +45,11 @@ def _post(url: str, payload: dict, field_mask: str) -> dict:
         "X-Goog-FieldMask": field_mask,
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=10.0) as client:
-        response = client.post(url, json=payload, headers=headers)
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(url, json=payload, headers=headers)
+    except httpx.HTTPError as e:
+        raise GoogleMapsError(f"network error: {e}")
     if not response.is_success:
         raise GoogleMapsError(f"HTTP {response.status_code}: {response.text[:200]}")
     return response.json()
@@ -72,7 +79,7 @@ def search_nearby_places(
         if place_types:
             payload["includedTypes"] = place_types
 
-        field_mask = "places.id,places.displayName,places.types,places.formattedAddress,places.location,places.rating,places.currentOpeningHours.openNow"
+        field_mask = "places.id,places.displayName,places.types,places.formattedAddress,places.location,places.rating,places.currentOpeningHours.openNow,places.accessibilityOptions"
         data = _post(f"{_PLACES_BASE}/places:searchNearby", payload, field_mask)
         return {"places": data.get("places", [])}
     except GoogleMapsError as e:
@@ -84,12 +91,13 @@ def search_places_text(
     lat: float = ROBOT_LAT,
     lng: float = ROBOT_LNG,
     radius_m: float = 2000.0,
+    max_results: int = 10,
 ) -> dict:
     """Search for places by free-text query, biased toward the given location (defaults to CDG)."""
     try:
         payload: dict = {
             "textQuery": query,
-            "maxResultCount": 10,
+            "maxResultCount": min(max(1, max_results), 20),
             "locationBias": {
                 "circle": {
                     "center": {"latitude": lat, "longitude": lng},
@@ -97,7 +105,7 @@ def search_places_text(
                 }
             },
         }
-        field_mask = "places.id,places.displayName,places.types,places.formattedAddress,places.location,places.rating,places.currentOpeningHours.openNow,places.websiteUri"
+        field_mask = "places.id,places.displayName,places.types,places.formattedAddress,places.location,places.rating,places.currentOpeningHours.openNow,places.websiteUri,places.accessibilityOptions"
         data = _post(f"{_PLACES_BASE}/places:searchText", payload, field_mask)
         return {"places": data.get("places", [])}
     except GoogleMapsError as e:
@@ -105,23 +113,41 @@ def search_places_text(
 
 
 def get_place_details(place_id: str) -> dict:
-    """Retrieve full details about a place: hours, accessibility, phone, website, reviews."""
+    """Retrieve full details about a place: hours, accessibility, phone, website,
+    rating and up to 5 user reviews (author, score, text)."""
     try:
         field_mask = (
             "id,displayName,formattedAddress,location,types,"
             "regularOpeningHours,currentOpeningHours,websiteUri,"
-            "internationalPhoneNumber,accessibilityOptions,"
-            "rating,userRatingCount"
+            "internationalPhoneNumber,accessibilityOptions,priceLevel,"
+            "editorialSummary,rating,userRatingCount,reviews"
         )
         headers = {
             "X-Goog-Api-Key": _api_key(),
             "X-Goog-FieldMask": field_mask,
         }
-        with httpx.Client(timeout=10.0) as client:
-            response = client.get(f"{_PLACES_BASE}/places/{place_id}", headers=headers)
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(f"{_PLACES_BASE}/places/{place_id}", headers=headers)
+        except httpx.HTTPError as e:
+            raise GoogleMapsError(f"network error: {e}")
         if not response.is_success:
             raise GoogleMapsError(f"HTTP {response.status_code}: {response.text[:200]}")
-        return response.json()
+        data = response.json()
+        # Trim the verbose reviews payload to what a voice answer needs.
+        if "reviews" in data:
+            data["reviews"] = [
+                {
+                    "author": r.get("authorAttribution", {}).get("displayName"),
+                    "rating": r.get("rating"),
+                    "when": r.get("relativePublishTimeDescription"),
+                    "text": (r.get("text") or r.get("originalText") or {}).get("text"),
+                }
+                for r in data["reviews"]
+            ]
+        if isinstance(data.get("editorialSummary"), dict):
+            data["editorialSummary"] = data["editorialSummary"].get("text")
+        return data
     except GoogleMapsError as e:
         return {"error": str(e)}
 
@@ -168,26 +194,53 @@ def compute_route(
     dest_lat: float = ROBOT_LAT,
     dest_lng: float = ROBOT_LNG,
     travel_mode: str = "WALK",
+    departure_time: Optional[str] = None,
 ) -> dict:
-    """Calculate the route and turn-by-turn steps between two coordinates."""
+    """Calculate the route and turn-by-turn steps between two coordinates.
+
+    For TRANSIT mode the response also carries line names, stops, schedules and fare.
+    `departure_time`: optional RFC3339 timestamp (e.g. '2026-06-19T14:00:00Z').
+    """
+    mode = travel_mode.upper()
     try:
-        payload = {
+        payload: dict = {
             "origin": {"location": {"latLng": {"latitude": origin_lat, "longitude": origin_lng}}},
             "destination": {"location": {"latLng": {"latitude": dest_lat, "longitude": dest_lng}}},
-            "travelMode": travel_mode.upper(),
+            "travelMode": mode,
             "computeAlternativeRoutes": False,
         }
-        field_mask = "routes.distanceMeters,routes.duration,routes.legs.steps.navigationInstruction,routes.legs.distanceMeters,routes.legs.duration"
+        if departure_time:
+            payload["departureTime"] = departure_time
+        if mode == "DRIVE":
+            # Traffic-aware ETA — only valid for DRIVE/TWO_WHEELER.
+            payload["routingPreference"] = "TRAFFIC_AWARE"
+
+        field_mask = (
+            "routes.distanceMeters,routes.duration,"
+            "routes.legs.steps.navigationInstruction,"
+            "routes.legs.distanceMeters,routes.legs.duration"
+        )
+        if mode == "TRANSIT":
+            # Transit legs expose line/stop/schedule under transitDetails + a fare.
+            field_mask += (
+                ",routes.legs.steps.transitDetails,"
+                "routes.travelAdvisory.transitFare,routes.localizedValues"
+            )
         data = _post(f"{_ROUTES_BASE}:computeRoutes", payload, field_mask)
         routes = data.get("routes", [])
         if not routes:
             return {"error": "No route found between the given points"}
         route = routes[0]
-        return {
+        result = {
             "distance_meters": route.get("distanceMeters"),
             "duration": route.get("duration"),
             "legs": route.get("legs", []),
         }
+        if mode == "TRANSIT":
+            advisory = route.get("travelAdvisory", {})
+            if advisory.get("transitFare"):
+                result["fare"] = advisory["transitFare"]
+        return result
     except GoogleMapsError as e:
         return {"error": str(e)}
 
@@ -228,12 +281,51 @@ def compute_route_matrix(
         return {"error": str(e)}
 
 
+def place_autocomplete(
+    input: str,
+    lat: float = ROBOT_LAT,
+    lng: float = ROBOT_LNG,
+    radius_m: float = 5000.0,
+) -> dict:
+    """Resolve a partial / spoken place name into ranked predictions (place name + place_id).
+
+    Useful before geocode/route when the user gives an incomplete or fuzzy name.
+    """
+    try:
+        payload: dict = {
+            "input": input,
+            "locationBias": {
+                "circle": {
+                    "center": {"latitude": lat, "longitude": lng},
+                    "radius": min(radius_m, 50000.0),
+                }
+            },
+            "languageCode": "fr",
+        }
+        # Autocomplete (New) ignores X-Goog-FieldMask; everything is returned.
+        data = _post(f"{_PLACES_BASE}/places:autocomplete", payload, "*")
+        predictions = []
+        for s in data.get("suggestions", []):
+            pp = s.get("placePrediction")
+            if not pp:
+                continue
+            predictions.append({
+                "place_id": pp.get("placeId"),
+                "text": pp.get("text", {}).get("text"),
+                "types": pp.get("types", []),
+            })
+        return {"predictions": predictions}
+    except GoogleMapsError as e:
+        return {"error": str(e)}
+
+
 # --- dispatch registry ---
 
 TOOL_REGISTRY = {
     "search_nearby_places": search_nearby_places,
     "search_places_text": search_places_text,
     "get_place_details": get_place_details,
+    "place_autocomplete": place_autocomplete,
     "geocode_address": geocode_address,
     "reverse_geocode": reverse_geocode,
     "compute_route": compute_route,
@@ -254,7 +346,8 @@ TOOLS = [
                 "Find places within a radius of a GPS coordinate. "
                 "Use to locate nearby amenities: restrooms, gates, shops, ATMs, lounges, "
                 "restaurants, information desks. Optionally filter by place type. "
-                "If no coordinates are given, use CDG centre (49.0097, 2.5479)."
+                "Each result includes wheelchair accessibility info (entrance/parking/restroom/seating) when known. "
+                "If no coordinates are given, the robot's position (Terminal 2F CDG) is used."
             ),
             "parameters": {
                 "type": "object",
@@ -323,9 +416,10 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Free-text search query, e.g. 'Air France lounge Terminal 2F CDG'."},
-                    "lat": {"type": "number", "description": "Latitude to bias results toward (default CDG 49.0097)."},
-                    "lng": {"type": "number", "description": "Longitude to bias results toward (default CDG 2.5479)."},
+                    "lat": {"type": "number", "description": "Latitude to bias results toward (default: robot position, Terminal 2F CDG)."},
+                    "lng": {"type": "number", "description": "Longitude to bias results toward (default: robot position, Terminal 2F CDG)."},
                     "radius_m": {"type": "number", "description": "Bias radius in metres (default 2000)."},
+                    "max_results": {"type": "integer", "description": "Max number of places to return (1-20, default 10)."},
                 },
                 "required": ["query"],
                 "additionalProperties": False,
@@ -338,8 +432,10 @@ TOOLS = [
             "name": "get_place_details",
             "description": (
                 "Retrieve full details for a specific place by its Google Place ID: "
-                "opening hours, phone number, website, accessibility options, and rating. "
-                "Use after search_nearby_places or search_places_text to get more info about a result."
+                "opening hours, phone number, website, accessibility, price level, editorial summary, "
+                "overall rating AND up to 5 user reviews (author, score, text). "
+                "Use after search_nearby_places/search_places_text/place_autocomplete to read "
+                "the notes and reviews of a place."
             ),
             "parameters": {
                 "type": "object",
@@ -350,6 +446,30 @@ TOOLS = [
                     }
                 },
                 "required": ["place_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "place_autocomplete",
+            "description": (
+                "Turn a partial, fuzzy or spoken place name into a short list of ranked "
+                "predictions (each with a name and a Google Place ID). Use FIRST when the user "
+                "names a place imprecisely ('le hall des départs', 'la gare RER'), then feed the "
+                "chosen place_id to get_place_details, or its name to geocode_address before routing. "
+                "Results are biased near CDG by default."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "input": {"type": "string", "description": "Partial text typed/spoken by the user."},
+                    "lat": {"type": "number", "description": "Latitude to bias predictions toward (default CDG)."},
+                    "lng": {"type": "number", "description": "Longitude to bias predictions toward (default CDG)."},
+                    "radius_m": {"type": "number", "description": "Bias radius in metres (default 5000, max 50000)."},
+                },
+                "required": ["input"],
                 "additionalProperties": False,
             },
         },
@@ -415,6 +535,13 @@ TOOLS = [
                         "type": "string",
                         "enum": ["WALK", "DRIVE", "TRANSIT", "BICYCLE"],
                         "description": "Travel mode (default WALK for indoor airport navigation).",
+                    },
+                    "departure_time": {
+                        "type": "string",
+                        "description": (
+                            "Optional RFC3339 departure time, e.g. '2026-06-19T14:00:00Z'. "
+                            "Use for TRANSIT (next departures) or DRIVE (traffic-aware ETA)."
+                        ),
                     },
                 },
                 "required": ["origin_lat", "origin_lng", "dest_lat", "dest_lng"],

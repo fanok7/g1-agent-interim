@@ -3,11 +3,12 @@ rps_game_runner.py — Moteur Pierre Feuille Ciseaux pour l'agent G1
 
 Deux phases :
   1. prepare()   → robot choisit son coup (secret), prêt à jouer
-  2. countdown() → synchronisé avec le compte à rebours vocal du robot
-                   révèle la main après ~4.5s (quand l'agent a fini "…1 2 3 !")
-                   puis détecte le geste du joueur
+  2. countdown() → synchronisé avec le compte à rebours vocal du robot :
+                   révèle la main quand events.py signale la fin du TTS
+                   (/tmp/rps_go), puis détecte le geste du joueur
 
 IPC :
+  /tmp/rps_go           → écrit par events.py à la fin du TTS "3! 2! 1! Go!"
   /tmp/rps_result.json  → lu par rps_result_loop dans events.py
   /tmp/gesture_cmd      → lu par gesture_cmd_loop dans main.py
   /tmp/vision_pause     → mis en pause vision_server pour libérer la caméra
@@ -35,15 +36,23 @@ try:
 except Exception:
     _ARM_AVAILABLE = False
 
-MODEL_PATH     = os.path.join(_RPS_DIR, 'yolo11-rps-detection.pt')
+try:
+    from robot import hand_idle
+    _HAND_IDLE_AVAILABLE = True
+except Exception:
+    _HAND_IDLE_AVAILABLE = False
+
+MODEL_PATH     = os.path.join(_RPS_DIR, 'rps_v2.engine')
 GESTURES_YAML  = os.path.join(_RPS_DIR, 'hand_gestures.yaml')
 RESULT_FILE    = '/tmp/rps_result.json'
 GESTURE_CMD    = '/tmp/gesture_cmd'
 VISION_PAUSE   = '/tmp/vision_pause'
 
-# Délai entre le retour du tool et la révélation de la main.
-# L'agent dit "3 ! 2 ! 1 ! Geste !" → ~3s de TTS.
-REVEAL_DELAY   = 3.0   # secondes
+# La révélation est synchronisée sur /tmp/rps_go, écrit par events.py à la fin
+# exacte de la lecture TTS "3 ! 2 ! 1 ! Go !". Le timeout couvre le cas où le
+# compte à rebours est interrompu (latence API + TTS ≈ 4-6s en temps normal).
+GO_SIGNAL      = '/tmp/rps_go'
+GO_TIMEOUT     = 9.0   # fallback si le signal n'arrive jamais
 DETECT_TIMEOUT = 6.0   # fenêtre de détection après la révélation
 
 REACTIONS = {
@@ -55,7 +64,7 @@ REACTIONS = {
 # ── État global ───────────────────────────────────────────────────────────────
 _state_lock       = threading.Lock()
 _robot_gesture    = None
-_game             = None
+_game             = RPSGame()   # singleton persistant — score conservé entre rounds
 _countdown_active = False
 _hand             = None
 _vision           = None
@@ -72,17 +81,30 @@ def is_busy():
         return _countdown_active
 
 
+def reset_score():
+    """Réinitialise le score (nouvelle partie depuis zéro)."""
+    global _game
+    with _state_lock:
+        _game = RPSGame()
+
+
 def prepare():
     """
     Phase 1 : robot choisit son coup en secret.
     Pré-charge le modèle YOLO et ouvre la connexion Modbus en background.
+    Le score est conservé entre les rounds — appeler reset_score() pour repartir de zéro.
     """
-    global _robot_gesture, _game, _hand, _vision
+    global _robot_gesture, _hand, _vision
     with _state_lock:
         if _countdown_active:
             return None
-        _game = RPSGame()
         _robot_gesture = random.choice(GESTES)
+
+    # Le mouvement naturel des mains (hand_idle) et RPSHand écrivent tous les
+    # deux sur le même registre Modbus de la main droite — il faut suspendre
+    # l'un avant que l'autre ne prenne la main, sous peine de conflit.
+    if _HAND_IDLE_AVAILABLE:
+        hand_idle.stop()
 
     _patch_yaml()
     _hand   = RPSHand(side='r')
@@ -98,7 +120,7 @@ def prepare():
 def countdown():
     """
     Phase 2 : lance le compte à rebours en background.
-    Le robot révèle sa main après REVEAL_DELAY secondes (synchronisé avec le TTS),
+    Le robot révèle sa main au signal /tmp/rps_go (fin du TTS, fallback GO_TIMEOUT),
     puis détecte le geste du joueur.
     """
     global _countdown_active
@@ -116,30 +138,43 @@ def _reveal_and_detect():
 
     try:
         t_start = time.time()
+        try:
+            os.remove(GO_SIGNAL)
+        except FileNotFoundError:
+            pass
 
         # Pauser vision_server pour libérer /dev/video0
         open(VISION_PAUSE, 'w').close()
-        time.sleep(0.3)
+        time.sleep(0.8)
 
-        # Attendre que le modèle YOLO soit prêt (chargé dans prepare())
-        if not _vision._model_ready.wait(timeout=10.0):
-            print('[RPS] WARN modèle non prêt après 10s', flush=True)
+        # Caméra démarrée pendant le compte à rebours : ouverture V4L2, réglage
+        # exposition et 1re inférence CUDA se font avant le "Go !" — la fenêtre
+        # de détection n'est plus amputée par le warm-up.
+        _vision.start()
 
         with _state_lock:
             gesture = _robot_gesture
 
-        # Synchronisation précise avec le TTS : attendre exactement REVEAL_DELAY
-        remaining = REVEAL_DELAY - (time.time() - t_start)
-        if remaining > 0:
-            print(f'[RPS] Attente révélation ({remaining:.1f}s restantes)...', flush=True)
-            time.sleep(remaining)
+        # Attendre la fin réelle du TTS "3 ! 2 ! 1 ! Go !" (signal de events.py)
+        print('[RPS] Attente du signal Go...', flush=True)
+        while time.time() - t_start < GO_TIMEOUT:
+            if os.path.exists(GO_SIGNAL):
+                break
+            time.sleep(0.05)
+        else:
+            print(f'[RPS] WARN signal Go absent — révélation au timeout ({GO_TIMEOUT}s)',
+                  flush=True)
+        try:
+            os.remove(GO_SIGNAL)
+        except FileNotFoundError:
+            pass
 
-        # Démarrer la caméra à l'instant de la révélation — zéro stale frames
-        _vision.start()
+        # Purger les détections du compte à rebours (un poing qui pompe = pierre)
+        _vision.reset()
 
         # ── RÉVÉLATION ── main du robot
         print(f'[RPS] Révèle : {gesture}', flush=True)
-        _hand.play(gesture)   # 1.0s (doigts + pouce) — YOLO chauffe pendant ce temps
+        _hand.play(gesture)   # 1.0s (doigts + pouce)
 
         # Détecter le geste du joueur
         print(f'[RPS] Détection joueur ({DETECT_TIMEOUT}s)...', flush=True)
@@ -151,23 +186,39 @@ def _reveal_and_detect():
             result = _game.play_round(player_gesture, gesture)
         print(f'[RPS] {result["message"]}', flush=True)
 
-        # Résultat → rps_result_loop
+        # Résultat → rps_result_loop : l'annonce vocale part tout de suite,
+        # pendant que le robot range sa main et relâche le bras.
         with open(RESULT_FILE, 'w') as f:
             json.dump(result, f, ensure_ascii=False)
 
-        # Réaction gestuelle → gesture_cmd_loop
+        # Nettoyage mains + bras AVANT le geste de réaction : ExecuteAction et
+        # arm_sdk ne doivent jamais commander les bras en même temps.
+        time.sleep(1.5)
+        _hand.open()
+        _vision.stop()
+        _hand.disconnect()
+        if _ARM_AVAILABLE:
+            arm_sdk.release_pose(wait=True)
+
+        # Réaction gestuelle → gesture_cmd_loop (bras maintenant libres)
         reaction = REACTIONS.get(result['result'])
         if reaction:
             with open(GESTURE_CMD, 'w') as f:
                 f.write(reaction)
 
-        # Nettoyage mains
-        time.sleep(1.5)
-        _hand.open()
-        _vision.stop()
-        _hand.disconnect()
-
     finally:
+        # Cleanup défensif : même après une exception en pleine partie,
+        # libérer caméra + main + bras pour que face_id récupère /dev/video0
+        try:
+            if _vision is not None:
+                _vision.stop()
+        except Exception:
+            pass
+        try:
+            if _hand is not None:
+                _hand.disconnect()
+        except Exception:
+            pass
         _hand   = None
         _vision = None
         _cleanup()
@@ -188,3 +239,5 @@ def _cleanup():
         os.remove(VISION_PAUSE)
     except FileNotFoundError:
         pass
+    if _HAND_IDLE_AVAILABLE:
+        hand_idle.start()

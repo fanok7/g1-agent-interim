@@ -4,7 +4,7 @@ import json
 import httpx
 from tools.registry import register
 
-_BASE_URL = "http://192.168.0.121:8000"
+_BASE_URL = "http://10.75.1.20:8001"
 _client   = httpx.Client(timeout=10.0, base_url=_BASE_URL)
 
 

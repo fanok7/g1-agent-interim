@@ -25,11 +25,10 @@ def _handler_start(**_kwargs):
     if runner.is_busy():
         return 'Partie déjà en cours.'
     runner.countdown()
-    # Ce texte est dit par le robot pendant que la main se prépare en arrière-plan.
-    # Le délai REVEAL_DELAY (4.5s) est calé sur la durée de ce compte à rebours.
-    return (
-        '3 ! 2 ! 1 ! Go !'
-    )
+    # Retourne un token opaque — le texte à dire est imposé par _TOOL_INSTRUCTIONS
+    # dans events.py, pas ici, pour éviter que le LLM le lise et le répète directement
+    # sans avoir appelé le tool.
+    return 'COUNTDOWN_OK'
 
 
 _SCHEMA_SETUP = {

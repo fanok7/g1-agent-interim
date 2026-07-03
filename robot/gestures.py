@@ -2,6 +2,12 @@ import time
 import threading
 import robot.hardware as hardware
 
+try:
+    from robot import hand_idle
+    _HAND_IDLE_AVAILABLE = True
+except Exception:
+    _HAND_IDLE_AVAILABLE = False
+
 _release_event = threading.Event()
 
 ACTION_MAP = {
@@ -35,8 +41,19 @@ def execute_gesture(geste: str):
     if geste not in ACTION_MAP:
         print(f'[GESTE] Inconnu : {geste}')
         return
+    # Ne jamais lancer un geste haut niveau pendant qu'arm_sdk tient une pose
+    # (jeu RPS, pointage) — les deux contrôleurs se disputeraient les bras
+    import robot.arm_sdk as arm_sdk
+    if arm_sdk.is_holding():
+        print(f'[GESTE] {geste} ignoré — arm_sdk tient une pose (jeu en cours)')
+        return
     code = ACTION_MAP[geste]
     print(f'[GESTE] {geste} → code {code}')
+    # Les gestes hauts niveau (ExecuteAction) pilotent aussi les mains — le
+    # mouvement naturel en tâche de fond (hand_idle) doit se taire le temps
+    # du geste, sinon les deux se disputent le même actionneur.
+    if _HAND_IDLE_AVAILABLE:
+        hand_idle.stop()
     try:
         if geste == 'mains_levees':
             _release_event.clear()
@@ -49,3 +66,6 @@ def execute_gesture(geste: str):
         arm_client.ExecuteAction(RESET_CODE)
     except Exception as e:
         print(f'[GESTE] Erreur : {e}')
+    finally:
+        if _HAND_IDLE_AVAILABLE:
+            hand_idle.start()

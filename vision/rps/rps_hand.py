@@ -21,12 +21,12 @@ from pymodbus.client import ModbusTcpClient
 
 # ── Config ───────────────────────────────────────────────────────────────────
 HANDS_CONFIG = {
-    "r": {"ip": "192.168.123.211", "name": "droite"},
-    "l": {"ip": "192.168.123.210", "name": "gauche"},
+    "r": {"ip": "192.168.123.210", "name": "droite"},
+    "l": {"ip": "192.168.123.211", "name": "gauche"},
 }
 PORT          = 6000
 DEVICE_ID     = 1
-GESTURES_FILE = "hand_gestures.yaml"
+GESTURES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hand_gestures.yaml")
 
 REG_POS_SET  = 1474
 REG_FORCE_SET= 1498
@@ -113,12 +113,15 @@ class RPSHand:
             print(f"[WARN] Main {self.name} non connectée — mode simulation")
 
     def _send(self, positions):
-        if self.connected:
+        if not self.connected:
+            print(f"[SIM] Envoi : {positions}")
+            return
+        try:
             self.client.write_registers(REG_POS_SET,
                                         [int(v) for v in positions],
                                         slave=DEVICE_ID)
-        else:
-            print(f"[SIM] Envoi : {positions}")
+        except Exception as e:
+            print(f"[{self.name}] Erreur Modbus : {e}")
 
     def play(self, geste):
         """
@@ -152,10 +155,13 @@ class RPSHand:
         print(f"[{self.name}] Ouverture")
 
     def disconnect(self):
+        """Ouvre la main puis ferme la connexion. Idempotent."""
+        if not self.connected:
+            return
         self.open()
         time.sleep(1.0)
-        if self.connected:
-            self.client.close()
+        self.client.close()
+        self.connected = False
         print(f"[{self.name}] Déconnectée")
 
 # ── Test standalone ───────────────────────────────────────────────────────────

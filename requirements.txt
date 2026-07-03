@@ -1,8 +1,29 @@
-# Python 3.8 requis (SDK Unitree incompatible avec versions supérieures)
+# Python 3.8 requis (SDK Unitree + TensorRT incompatibles avec versions supérieures)
 
+# ── Core agent ─────────────────────────────────────────
 numpy
 sounddevice
 websockets
 python-dotenv
 requests
-supabase
+pytz
+
+# ── Vision ─────────────────────────────────────────────
+opencv-python
+Pillow
+pyrealsense2          # Intel RealSense D435I
+pyzbar                # scan QR codes (tool qr_tool)
+
+# ── Google APIs (Calendar + Gmail) ─────────────────────
+google-api-python-client
+google-auth
+google-auth-oauthlib  # scripts/calendar_setup.py + scripts/gmail_setup.py
+
+# ── Mains Inspire RH56E2 ───────────────────────────────
+pymodbus              # Modbus TCP (jeu RPS)
+
+# ── ESP32 / bouche émotions (launch.py) ────────────────
+pyserial
+
+# ── Supabase (commenté — database.py non actif) ────────
+# supabase
