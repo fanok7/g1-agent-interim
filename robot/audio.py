@@ -1,45 +1,69 @@
-import sys, os, tempfile, subprocess, time
+import sys, os, time
 sys.path.insert(0, '/home/unitree/unitree_sdk2_python/example/g1/audio')
 
-import sounddevice as sd
 import numpy as np
-from wav import read_wav, play_pcm_stream
+import sounddevice as sd
+from wav import play_pcm_stream
 from config import VOLUME_BOOST
 import robot.hardware as hardware
 
 
 def find_microphone():
-    for i, d in enumerate(sd.query_devices()):
-        if 'USB' in d['name'] and d['max_input_channels'] > 0:
+    devices = sd.query_devices()
+    for i, d in enumerate(devices):
+        if d['max_input_channels'] > 0 and 'MIC' in d['name'].upper():
             sr = int(d['default_samplerate'])
             print(f'[MICRO] {d["name"]} index={i} sr={sr}')
             return i, sr
-    print('[MICRO] USB non trouvé, device par défaut')
-    return None, 48000
+    for i, d in enumerate(devices):
+        if d['max_input_channels'] > 0 and 'USB' in d['name'].upper():
+            sr = int(d['default_samplerate'])
+            print(f'[MICRO] fallback {d["name"]} index={i} sr={sr}')
+            return i, sr
+    sr = int(sd.query_devices(0)['default_samplerate'])
+    print(f'[MICRO] fallback index=0 sr={sr}')
+    return 0, sr
 
 
-def play_audio(pcm_bytes):
+def _resample(pcm_24k: bytes) -> list:
+    """PCM 24kHz 16-bit mono → PCM 16kHz 16-bit mono + volume boost.
+    Retourne list[int] (octets bruts) attendu par play_pcm_stream.
+    Traitement in-process : pas de subprocess ffmpeg, pas de fichiers temp."""
+    samples = np.frombuffer(pcm_24k, dtype=np.int16).astype(np.float32)
+    if len(samples) == 0:
+        return []
+    n_out = int(round(len(samples) * 16000 / 24000))
+    resampled = np.interp(
+        np.linspace(0.0, 1.0, n_out),
+        np.linspace(0.0, 1.0, len(samples)),
+        samples,
+    )
+    resampled = np.clip(resampled * VOLUME_BOOST, -32768, 32767).astype(np.int16)
+    return list(resampled.tobytes())
+
+
+def play_audio(pcm_bytes: bytes):
     audio_client = hardware.get_audio_client()
-    tmp_raw = tempfile.mktemp(suffix='.raw')
-    tmp_wav = tempfile.mktemp(suffix='.wav')
-    tmp_16k = tempfile.mktemp(suffix='_16k.wav')
-    try:
-        with open(tmp_raw, 'wb') as f:
-            f.write(pcm_bytes)
-        subprocess.run(
-            ['ffmpeg', '-f', 's16le', '-ar', '24000', '-ac', '1', '-i', tmp_raw, tmp_wav, '-y'],
-            capture_output=True
-        )
-        subprocess.run(
-            ['ffmpeg', '-i', tmp_wav, '-ar', '16000', '-ac', '1', '-af', f'volume={VOLUME_BOOST}', tmp_16k, '-y'],
-            capture_output=True
-        )
-        pcm, sr, ch, ok = read_wav(tmp_16k)
-        if ok:
-            play_pcm_stream(audio_client, pcm, 'chat')
-            time.sleep(len(pcm) / 32000 + 0.5)
-        audio_client.PlayStop('chat')
-    finally:
-        for f in [tmp_raw, tmp_wav, tmp_16k]:
-            if os.path.exists(f):
-                os.unlink(f)
+    if not pcm_bytes:
+        return
+
+    pcm_list = _resample(pcm_bytes)
+    if not pcm_list:
+        return
+
+    # Durée réelle de l'audio converti (16kHz mono 16-bit = 2 bytes/sample)
+    dur = len(pcm_list) / (16000 * 2)
+
+    t0 = time.time()
+    # sleep_time=0.05 : envoie les chunks rapidement (vs 1.0s par défaut)
+    # pour éviter le double-comptage qui bloquait le micro 2+ secondes trop longtemps.
+    play_pcm_stream(audio_client, pcm_list, 'chat', sleep_time=0.05)
+
+    # Attendre uniquement le temps restant pour que l'audio finisse de jouer,
+    # en tenant compte du temps déjà passé dans play_pcm_stream.
+    elapsed = time.time() - t0
+    remaining = max(0.0, dur - elapsed + 0.15)
+    time.sleep(remaining)
+
+    audio_client.PlayStop('chat')
+    time.sleep(0.1)

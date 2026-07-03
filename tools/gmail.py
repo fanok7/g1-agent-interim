@@ -106,7 +106,11 @@ def _lire_handler(n: int = 5, non_lus: bool = True) -> str:
             )
             svc.users().messages().modify(
                 userId='me', id=m['id'],
+<<<<<<< HEAD
                 body={'addLabelIds': ['UNREAD']}
+=======
+                body={'removeLabelIds': ['UNREAD']}
+>>>>>>> vision_dev
             ).execute()
         return '\n'.join(lignes)
     except Exception as e:

@@ -4,7 +4,12 @@ Registry de tools — point central de découverte.
 Chaque tool s'enregistre via register().
 L'agent récupère les schémas OpenAI avec get_schemas()
 et dispatche les appels avec call(name, args).
+
+call() retourne toujours une str (les handlers peuvent retourner str ou dict) :
+les tools restent indépendants du format attendu par l'API Realtime.
 """
+
+import json
 
 _tools = {}
 
@@ -26,7 +31,10 @@ def call(name: str, args: dict) -> str:
     if name not in _tools:
         return f'Tool inconnu : {name}'
     try:
-        return _tools[name]['handler'](**args)
+        result = _tools[name]['handler'](**args)
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         return f'Erreur tool {name} : {e}'
 

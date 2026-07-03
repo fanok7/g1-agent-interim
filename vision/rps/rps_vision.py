@@ -19,6 +19,10 @@ import cv2
 import threading
 import time
 import argparse
+<<<<<<< HEAD
+=======
+import numpy as np
+>>>>>>> vision_dev
 from collections import Counter
 from ultralytics import YOLO
 
@@ -27,12 +31,17 @@ CONF_MIN    = 0.50
 SKIP        = 3
 BUF_LEN     = 8    # frames pour stabiliser le geste
 
+<<<<<<< HEAD
 # Mapping anglais → français
+=======
+# Mapping anglais → français (insensible à la casse)
+>>>>>>> vision_dev
 FR = {"rock": "pierre", "paper": "feuille", "scissors": "ciseaux"}
 
 class RPSVision:
     def __init__(self, model_path="yolo11-rps-detection.pt", source=0,
                  conf=CONF_MIN):
+<<<<<<< HEAD
         self.model_path = model_path
         self.source     = source
         self.conf       = conf
@@ -42,6 +51,39 @@ class RPSVision:
         self._lock      = threading.Lock()
         self._thread    = None
         self._frame     = None    # dernière frame annotée
+=======
+        self.model_path    = model_path
+        self.source        = source
+        self.conf          = conf
+        self._gesture      = None
+        self._raw          = None
+        self._running      = False
+        self._lock         = threading.Lock()
+        self._thread       = None
+        self._frame        = None
+        self._model        = None
+        self._model_ready  = threading.Event()
+        self._preloading   = False
+        self._clear_req    = threading.Event()
+
+    def preload(self):
+        """Charge le modèle YOLO en avance (appeler pendant prepare())."""
+        self._preloading = True
+        model = YOLO(self.model_path)
+        # Warm-up : la 1re inférence initialise CUDA/TensorRT (plusieurs secondes)
+        model(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, verbose=False)
+        self._model = model
+        self._model_ready.set()
+        print(f"[RPS] Modèle prêt : {list(model.names.values())}")
+
+    def reset(self):
+        """Purge le geste stable et le buffer — à appeler à la révélation pour
+        ignorer les détections faites pendant le compte à rebours."""
+        self._clear_req.set()
+        with self._lock:
+            self._gesture = None
+            self._raw     = None
+>>>>>>> vision_dev
 
     def start(self):
         self._running = True
@@ -77,7 +119,17 @@ class RPSVision:
         return None
 
     def _loop(self):
+<<<<<<< HEAD
         model = YOLO(self.model_path)
+=======
+        if self._preloading:
+            # preload() en cours dans un autre thread — ne pas charger en double
+            self._model_ready.wait(timeout=30.0)
+        if self._model is None:
+            self._model = YOLO(self.model_path)
+            self._model_ready.set()
+        model = self._model
+>>>>>>> vision_dev
         print(f"[INFO] Classes modèle : {model.names}")
 
         cap = cv2.VideoCapture(
@@ -101,12 +153,23 @@ class RPSVision:
 
             frame_idx += 1
 
+<<<<<<< HEAD
             if frame_idx % SKIP == 0:
                 h0, w0 = frame.shape[:2]
                 small  = cv2.resize(frame, (320, int(h0*320/w0)))
                 sx, sy = w0/320, h0/int(h0*320/w0)
 
                 results  = model(small, imgsz=320, verbose=False,
+=======
+            if self._clear_req.is_set():
+                gesture_buf.clear()
+                self._clear_req.clear()
+
+            if frame_idx % SKIP == 0:
+                # Frame native : le moteur TensorRT a une entrée fixe 640x640,
+                # réduire à 320 divisait la résolution utile par deux
+                results  = model(frame, imgsz=640, verbose=False,
+>>>>>>> vision_dev
                                  conf=self.conf)
                 last_res = []
                 for r in results:
@@ -114,11 +177,19 @@ class RPSVision:
                     for box, cls, c in zip(r.boxes.xyxy.cpu().numpy(),
                                            r.boxes.cls.cpu().numpy(),
                                            r.boxes.conf.cpu().numpy()):
+<<<<<<< HEAD
                         box[[0,2]] *= sx; box[[1,3]] *= sy
                         last_res.append((box.copy(),
                                          model.names[int(cls)], float(c)))
 
                 g = FR.get(last_res[0][1]) if last_res else None
+=======
+                        last_res.append((box.copy(),
+                                         model.names[int(cls)], float(c)))
+
+                best = max(last_res, key=lambda x: x[2]) if last_res else None
+                g = FR.get(best[1].lower()) if best else None
+>>>>>>> vision_dev
                 gesture_buf.append(g)
                 if len(gesture_buf) > BUF_LEN: gesture_buf.pop(0)
                 valid = [x for x in gesture_buf if x]
@@ -153,15 +224,26 @@ class RPSVision:
 
 # ── Test standalone ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
+<<<<<<< HEAD
     ap = argparse.ArgumentParser()
     ap.add_argument("--model",  default="yolo11-rps-detection.pt")
     ap.add_argument("--source", default="/dev/video4")
     ap.add_argument("--conf",   type=float, default=0.50)
+=======
+    import socket
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model",  default="yolo11-rps-detection.pt")
+    ap.add_argument("--source", default="0")
+    ap.add_argument("--conf",   type=float, default=0.50)
+    ap.add_argument("--port",   type=int,   default=8082)
+    ap.add_argument("--stream", action="store_true", help="MJPEG HTTP stream")
+>>>>>>> vision_dev
     args = ap.parse_args()
 
     vision = RPSVision(args.model, args.source, args.conf)
     vision.start()
 
+<<<<<<< HEAD
     print("Appuyez sur Q pour quitter")
     while True:
         frame = vision.get_frame()
@@ -172,3 +254,60 @@ if __name__ == "__main__":
 
     vision.stop()
     cv2.destroyAllWindows()
+=======
+    if args.stream:
+        # ── Serveur MJPEG ──────────────────────────────────────────────────────
+        HOST = "0.0.0.0"
+        print(f"[STREAM] http://192.168.123.164:{args.port}/  — Ctrl+C pour quitter")
+
+        def _handle(conn):
+            try:
+                conn.recv(1024)
+                conn.sendall(
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n"
+                )
+                while True:
+                    frame = vision.get_frame()
+                    if frame is None:
+                        time.sleep(0.05)
+                        continue
+                    _, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    data = jpg.tobytes()
+                    try:
+                        conn.sendall(
+                            b"--frame\r\nContent-Type: image/jpeg\r\n"
+                            b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n"
+                            + data + b"\r\n"
+                        )
+                    except BrokenPipeError:
+                        break
+                    time.sleep(0.05)
+            finally:
+                conn.close()
+
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind((HOST, args.port))
+        srv.listen(4)
+        try:
+            while True:
+                conn, _ = srv.accept()
+                threading.Thread(target=_handle, args=(conn,), daemon=True).start()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            vision.stop()
+            srv.close()
+
+    else:
+        print("Appuyez sur Q pour quitter")
+        while True:
+            frame = vision.get_frame()
+            if frame is not None:
+                cv2.imshow("RPS Vision", frame)
+            if cv2.waitKey(1) & 0xFF in (ord('q'), 27):
+                break
+        vision.stop()
+        cv2.destroyAllWindows()
+>>>>>>> vision_dev

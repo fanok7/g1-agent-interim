@@ -1,0 +1,32 @@
+# Unitree G1 EDU robot overrides (Jetson Orin NX, headless)
+# Lancé et supervisé par main.py — voir _supervise(VISION_FIRE_SCRIPT, ...)
+camera:
+  backend: shared_frame         # lit la frame partagée, n'ouvre aucun /dev/video*
+  path: /tmp/latest_ugreen.jpg  # frame UGREEN écrite par face_id.py (partagée)
+  fps: 2                        # cadence basse : 3e YOLO sur l'Orin (face_id + vision_server + fall)
+
+model:
+  filename: best.engine         # TensorRT engine exporté sur le Jetson (scripts/export_tensorrt.py)
+  device: cuda
+
+alert:
+  fire:
+    handler: agent              # écrit /tmp/fire_state.json → consommé par agent/events.py
+    state_file: /tmp/fire_state.json
+    min_trigger_frames: 3       # 3 images consécutives "fire" avant alerte (anti faux positifs)
+    cooldown_seconds: 30
+    save_image: true            # screenshot annoté de la preuve (envoyé par email)
+    save_dir: /home/unitree/g1_agent_interim/vision/Screenshot
+  smoke:
+    handler: agent
+    state_file: /tmp/fire_state.json
+    min_trigger_frames: 5       # fumée = seuil plus lâche
+    cooldown_seconds: 30
+    save_image: true
+    save_dir: /home/unitree/g1_agent_interim/vision/Screenshot
+
+display:
+  show_window: false
+
+logging:
+  level: WARNING

@@ -1,0 +1,33 @@
+model:
+  repo_id: SalahALHaismawi/yolov26-fire-detection
+  filename: best.pt
+  confidence: 0.5
+  device: cpu
+
+camera:
+  backend: opencv
+  source: 1
+  width: 640
+  height: 640
+  fps: 30
+
+alert:
+  fire:
+    handler: console
+    min_trigger_frames: 2
+    cooldown_seconds: 30
+    save_image: true
+    save_dir: alerts/fire/
+  smoke:
+    handler: console
+    min_trigger_frames: 5
+    cooldown_seconds: 15
+    save_image: true
+    save_dir: alerts/smoke/
+
+display:
+  show_window: true
+  window_title: "Fire Detection"
+
+logging:
+  level: INFO

@@ -1,0 +1,22 @@
+# Unitree G1 EDU robot overrides (Jetson Orin NX, headless)
+# Lancé et supervisé par main.py — voir _supervise(VISION_FALL_SCRIPT, ...)
+camera:
+  backend: shared_frame      # lit la frame partagée, n'ouvre aucun /dev/video*
+  path: /tmp/latest_ugreen.jpg  # frame UGREEN écrite par face_id.py (partagée avec vision_server)
+  fps: 4                     # cadence d'inférence : borne la charge GPU (Orin partagé avec face_id + vision_server)
+
+model:
+  filename: best.engine      # TensorRT engine exporté sur le Jetson (scripts/export_tensorrt.py)
+  device: cuda
+
+alert:
+  handler: agent             # écrit /tmp/fall_state.json → consommé par agent/events.py
+  min_fall_frames: 12        # 12 images consécutives "fallen" avant alerte (anti faux positifs)
+  save_image: true           # sauvegarde la frame de la chute (preuve, envoyée par email)
+  save_dir: /home/unitree/g1_agent_interim/vision/Screenshot
+
+display:
+  show_window: false
+
+logging:
+  level: WARNING

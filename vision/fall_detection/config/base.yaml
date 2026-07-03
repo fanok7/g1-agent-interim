@@ -1,0 +1,27 @@
+model:
+  repo_id: melihuzunoglu/human-fall-detection
+  filename: best.pt
+  confidence: 0.90
+  device: cpu  # or "cuda" if available
+
+camera:
+  backend: opencv  # opencv | realsense
+  source: 1        # int index, file path, or RTSP URL
+  width: 640
+  height: 480
+  fps: 30
+
+alert:
+  handler: console               # console | webhook | agent
+  state_file: /tmp/fall_state.json  # écrit par AgentToolHandler (handler: agent)
+  min_fall_frames: 30             # consecutive fallen detections before alert fires
+  cooldown_seconds: 10           # minimum seconds between alerts
+  save_image: false              # save frame to disk on alert
+  save_dir: alerts/
+
+display:
+  show_window: true
+  window_title: "Fall Detection"
+
+logging:
+  level: INFO
