@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>G1 — Tablette virtuelle</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap');
+
+  :root {
+    --background: #F5F5F7;
+    --white: #FFFFFF;
+    --text-primary: #1F1F27;
+    --text-secondary: #5B5B6A;
+    --accent: #7B2CBF;
+    --card-border: rgba(123, 44, 191, 0.18);
+    --shadow: 0 30px 65px rgba(123, 44, 191, 0.11);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0; min-height: 100vh; width: 100vw;
+    background: var(--background); color: var(--text-primary);
+    font-family: 'Montserrat', 'Segoe UI', Arial, sans-serif;
+    display: flex; justify-content: center; align-items: center;
+    overflow: hidden;
+  }
+
+  #app {
+    width: 100%; height: 100vh; max-width: 1920px;
+    display: flex; flex-direction: column; padding: 24px 32px;
+  }
+
+  /* ── Header ── */
+  #header {
+    width: 100%; display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 40px; background: var(--white); border-radius: 24px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.05); flex-shrink: 0;
+  }
+  #logo { display: flex; align-items: center; gap: 16px; }
+  #logo-mark {
+    min-width: 44px; height: 44px; border-radius: 24px; background: var(--accent);
+    color: var(--white); display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; font-weight: 700; letter-spacing: 0.08em;
+  }
+  #logo-text { font-size: 1.3rem; font-weight: 700; letter-spacing: 0.04em; }
+  #header-title {
+    font-weight: 600; font-size: 0.9rem; color: var(--text-secondary);
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  #accent-line { width: 100%; height: 5px; margin: 18px 0; background: var(--accent); border-radius: 999px; flex-shrink: 0; }
+
+  /* ── Indicateur d'état IA (écoute / réfléchit / parle) ── */
+  #ai-status {
+    display: flex; align-items: center; gap: 10px; padding: 8px 18px;
+    background: var(--background); border-radius: 999px;
+  }
+  #ai-status .ai-icon { position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; }
+  #ai-status .wave, #ai-status .gear, #ai-status .mouth { display: none; }
+  #ai-label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.04em; }
+
+  /* écoute : onde sonore (barres qui rebondissent) */
+  #ai-status.status--ecoute .wave { display: flex; align-items: center; gap: 3px; height: 100%; }
+  #ai-status .wave span { width: 3px; background: var(--accent); border-radius: 2px; animation: wave-bounce 1s ease-in-out infinite; }
+  #ai-status .wave span:nth-child(1) { height: 40%; animation-delay: 0s; }
+  #ai-status .wave span:nth-child(2) { height: 100%; animation-delay: .15s; }
+  #ai-status .wave span:nth-child(3) { height: 70%; animation-delay: .3s; }
+  #ai-status .wave span:nth-child(4) { height: 55%; animation-delay: .45s; }
+  @keyframes wave-bounce { 0%, 100% { transform: scaleY(.4); } 50% { transform: scaleY(1); } }
+
+  /* réfléchit : engrenage qui tourne */
+  #ai-status.status--reflechit .gear {
+    display: block; font-size: 1.3rem; color: var(--accent);
+    animation: gear-spin 1.1s linear infinite;
+  }
+  @keyframes gear-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  /* parle : bouche animée (ouverture/fermeture) */
+  #ai-status.status--parle .mouth {
+    display: block; width: 22px; height: 12px; background: var(--accent);
+    border-radius: 0 0 12px 12px; transform-origin: top center;
+    animation: mouth-talk .35s ease-in-out infinite;
+  }
+  @keyframes mouth-talk { 0%, 100% { transform: scaleY(.3); } 50% { transform: scaleY(1); } }
+
+  /* ── Carte principale + panneau de chat ── */
+  #main {
+    flex: 1; min-height: 0; display: flex; flex-direction: row;
+    align-items: stretch; gap: 24px; padding: 8px;
+  }
+  #main-card {
+    flex: 2; min-width: 0; height: 100%;
+    background: var(--white); border: 1px solid var(--card-border); border-radius: 34px;
+    box-shadow: var(--shadow); display: flex; align-items: center; justify-content: center;
+    padding: 40px; overflow: hidden;
+  }
+
+  /* ── Panneau de chat (transcription vocale + discussion) ── */
+  /* Se masque automatiquement dès qu'un contenu (texte/QR/plan) est affiché,
+     pour laisser toute la place au schéma — la conversation n'est utile que
+     quand il n'y a rien d'autre à montrer (idle). */
+  #chat-panel {
+    flex: 0 0 380px; height: 100%; display: flex; flex-direction: column;
+    background: var(--white); border: 1px solid var(--card-border); border-radius: 34px;
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  #chat-panel.hidden { display: none; }
+  #chat-header {
+    padding: 20px 24px; font-weight: 700; font-size: 0.95rem; color: var(--text-primary);
+    border-bottom: 1px solid var(--card-border); display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0;
+  }
+  /* Bouton flottant pour ré-ouvrir la conversation pendant qu'un contenu est affiché */
+  #chat-reopen-btn {
+    display: none; position: fixed; bottom: 24px; right: 24px; z-index: 10;
+    width: 56px; height: 56px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent); color: var(--white); font-size: 1.4rem;
+    box-shadow: 0 14px 30px rgba(123,44,191,.3); align-items: center; justify-content: center;
+  }
+  #chat-reopen-btn.visible { display: flex; }
+
+  #chat-messages {
+    flex: 1; min-height: 0; overflow-y: auto; padding: 20px; display: flex;
+    flex-direction: column; gap: 12px;
+  }
+  .bubble {
+    max-width: 85%; padding: 12px 16px; border-radius: 16px; font-size: 0.92rem;
+    line-height: 1.45; word-wrap: break-word; white-space: pre-wrap;
+  }
+  .bubble.assistant {
+    align-self: flex-start; background: var(--background); color: var(--text-primary);
+    border-bottom-left-radius: 4px;
+  }
+  .bubble.user {
+    align-self: flex-end; background: var(--accent); color: var(--white);
+    border-bottom-right-radius: 4px;
+  }
+
+  #chat-empty { padding: 20px; color: var(--text-secondary); font-size: 0.85rem; text-align: center; opacity: .6; }
+
+  /* ── Veille ── */
+  #idle {
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 14px; opacity: 0.45;
+  }
+  #idle .dot {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  #idle span { font-weight: 500; letter-spacing: 0.04em; }
+  @keyframes pulse { 0%,100% { opacity: .3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.3); } }
+
+  /* ── Texte ──
+     Unités relatives au conteneur (main-card) plutôt qu'à l'écran entier
+     (vw/vh/vmin) : main-card partage désormais la largeur avec chat-panel,
+     donc une taille calculée sur 100% de l'écran déborde et casse la mise
+     en page dès que le panneau de chat est présent. */
+  #text-view { display: none; flex-direction: row; gap: 40px; width: 100%; height: 100%; align-items: center; }
+  #text-view .text-body { flex: 1; min-width: 0; max-height: 100%; overflow-y: auto; }
+  #text-view h1 { font-size: 2.2em; margin: 0 0 20px; color: var(--accent); }
+  #text-view pre {
+    font-family: inherit; font-size: 1.3em; line-height: 1.7; color: var(--text-secondary);
+    white-space: pre-wrap; margin: 0;
+  }
+  #text-view .text-qr-block {
+    flex: 0 0 auto; width: 30%; max-width: 220px; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; background: var(--background);
+    border-radius: 20px; padding: 24px; border: 1px solid var(--card-border);
+  }
+  #text-view img#text-qr { width: 100%; height: auto; aspect-ratio: 1 / 1; image-rendering: pixelated; border-radius: 8px; }
+  #text-view .text-qr-caption { font-size: 0.85em; color: var(--text-secondary); text-align: center; }
+
+  /* ── QR Code générique ── */
+  #qr-view { display: none; align-items: center; justify-content: center; flex-direction: column; gap: 24px; width: 100%; height: 100%; }
+  #qr-view h1 { font-size: 1.8em; margin: 0; color: var(--accent); }
+  #qr-view img {
+    width: 60%; max-width: 420px; height: auto; aspect-ratio: 1 / 1;
+    image-rendering: pixelated; border-radius: 16px;
+  }
+
+  /* ── Plan (carte + QR de récupération) ── */
+  #plan-view { display: none; flex-direction: column; align-items: center; justify-content: center; gap: 20px; width: 100%; height: 100%; }
+  #plan-view h1 { font-size: 1.6em; margin: 0; color: var(--accent); }
+  #plan-view .plan-body { display: flex; gap: 40px; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 0; }
+  #plan-view img#plan-image {
+    flex: 1 1 auto; min-width: 0; max-width: 65%; max-height: 100%;
+    object-fit: contain; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.08);
+  }
+  #plan-view .plan-qr-block {
+    flex: 0 0 auto; width: 25%; max-width: 200px; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    background: var(--background); border-radius: 20px; padding: 24px; border: 1px solid var(--card-border);
+  }
+  #plan-view img#plan-qr { width: 100%; height: auto; aspect-ratio: 1 / 1; image-rendering: pixelated; border-radius: 8px; }
+  #plan-view .plan-caption { font-size: 0.9em; color: var(--text-secondary); text-align: center; }
+
+  /* ── Boutons tactiles dynamiques (adaptés à la question posée) ── */
+  #choice-buttons {
+    display: none; gap: 20px; justify-content: center; flex-wrap: wrap;
+    padding: 18px 0 4px; flex-shrink: 0;
+  }
+  #choice-buttons button {
+    font-family: inherit; font-size: 1.25rem; font-weight: 700; letter-spacing: 0.04em;
+    border: none; border-radius: 20px; padding: 20px 44px; cursor: pointer;
+    background: var(--accent); color: var(--white); box-shadow: 0 14px 30px rgba(123,44,191,.28);
+    transition: transform .1s ease, box-shadow .1s ease;
+  }
+  #choice-buttons button:active { transform: scale(0.96); }
+  /* Le dernier bouton d'une paire oui/non (ou le 2e de 2 options) reste
+     visuellement secondaire — évite que tous les boutons crient "action
+     principale" quand il y en a plusieurs. */
+  #choice-buttons button.secondary {
+    background: var(--white); color: var(--text-secondary); border: 2px solid var(--card-border);
+    box-shadow: none;
+  }
+
+  #status { position: fixed; bottom: 10px; right: 16px; font-size: 0.75em; color: var(--text-secondary); opacity: 0.5; }
+</style>
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div id="logo">
+        <div id="logo-mark">G1</div>
+        <div id="logo-text">I-Interim</div>
+      </div>
+      <div id="ai-status" class="status--ecoute">
+        <div class="ai-icon">
+          <div class="wave"><span></span><span></span><span></span><span></span></div>
+          <div class="gear">⚙</div>
+          <div class="mouth"></div>
+        </div>
+        <span id="ai-label">Écoute...</span>
+      </div>
+      <div id="header-title">Robot d'assistance</div>
+    </header>
+
+    <div id="accent-line"></div>
+
+    <main id="main">
+      <div id="main-card">
+        <div id="idle">
+          <div class="dot"></div>
+          <span>En veille</span>
+        </div>
+        <div id="text-view">
+          <div class="text-body">
+            <h1 id="text-titre"></h1>
+            <pre id="text-contenu"></pre>
+          </div>
+          <div class="text-qr-block">
+            <img id="text-qr" alt="QR code de récupération">
+            <div class="text-qr-caption" id="text-qr-caption"></div>
+          </div>
+        </div>
+        <div id="qr-view">
+          <h1 id="qr-titre"></h1>
+          <img id="qr-image" alt="QR code">
+        </div>
+        <div id="plan-view">
+          <h1 id="plan-titre"></h1>
+          <div class="plan-body">
+            <img id="plan-image" alt="Carte itinéraire">
+            <div class="plan-qr-block">
+              <img id="plan-qr" alt="QR code de récupération">
+              <div class="plan-caption">Scannez pour ouvrir l'itinéraire dans Google Maps sur votre téléphone</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="chat-panel">
+        <div id="chat-header">
+          <span>Conversation</span>
+        </div>
+        <div id="chat-messages">
+          <div id="chat-empty">La conversation apparaîtra ici.</div>
+        </div>
+      </div>
+    </main>
+
+    <div id="choice-buttons"></div>
+  </div>
+  <button id="chat-reopen-btn" type="button" title="Revoir la conversation">💬</button>
+  <div id="status">déconnecté</div>
+
+<script>
+const idleEl    = document.getElementById('idle');
+const textView  = document.getElementById('text-view');
+const qrView    = document.getElementById('qr-view');
+const planView  = document.getElementById('plan-view');
+const statusEl  = document.getElementById('status');
+const aiStatusEl = document.getElementById('ai-status');
+const aiLabelEl  = document.getElementById('ai-label');
+const choiceButtonsEl = document.getElementById('choice-buttons');
+const chatPanelEl     = document.getElementById('chat-panel');
+const chatMessagesEl  = document.getElementById('chat-messages');
+const chatEmptyEl     = document.getElementById('chat-empty');
+const chatReopenBtnEl = document.getElementById('chat-reopen-btn');
+
+// Le panneau de conversation se masque automatiquement dès qu'un contenu
+// (texte/QR/plan) est affiché, pour lui laisser toute la place — repasse en
+// idle = la conversation reprend sa place. Un bouton flottant permet de la
+// rouvrir manuellement sans attendre le retour à l'idle.
+function setChatPanelVisible(visible) {
+  chatPanelEl.classList.toggle('hidden', !visible);
+  chatReopenBtnEl.classList.toggle('visible', !visible);
+}
+chatReopenBtnEl.addEventListener('click', () => setChatPanelVisible(true));
+
+const AI_LABELS = { ecoute: 'Écoute...', reflechit: 'Réfléchit...', parle: 'Parle...' };
+
+// ── Bulles de conversation ──────────────────────────────────────────────
+function appendBubble(role, text) {
+  if (chatEmptyEl) chatEmptyEl.remove();
+  const div = document.createElement('div');
+  div.className = 'bubble ' + role;
+  div.textContent = text;
+  chatMessagesEl.appendChild(div);
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  return div;
+}
+
+function setAiStatus(status) {
+  aiStatusEl.className = 'status--' + status;
+  aiLabelEl.textContent = AI_LABELS[status] || '';
+}
+
+// Utilisé uniquement par les boutons tactiles (choix rapides) — la tablette
+// n'a pas de micro/voix à elle : le vrai robot a déjà les siens (micro,
+// haut-parleur, IA de conversation dans main.py/events.py). Ici, on
+// n'envoie que la réponse d'un tap tactile, en alternative à l'oral.
+function sendResponse(text) {
+  setChoices([]);  // masquage optimiste — évite un double-clic pendant l'aller-retour réseau
+  fetch('/respond', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  }).catch(err => console.error('Erreur envoi réponse:', err));
+}
+
+// Génère un bouton par option reçue de proposer_choix() — s'adapte à
+// n'importe quelle question fermée (oui/non, mode de transport, etc.),
+// pas juste un binaire fixe. Le dernier bouton d'une liste de 2 (typiquement
+// "Non") est stylé en secondaire pour ne pas donner un poids visuel égal à
+// un simple refus.
+function setChoices(options) {
+  choiceButtonsEl.innerHTML = '';
+  if (!options || options.length === 0) {
+    choiceButtonsEl.style.display = 'none';
+    return;
+  }
+  options.forEach((label, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    if (options.length === 2 && i === options.length - 1) btn.classList.add('secondary');
+    btn.addEventListener('click', () => sendResponse(label));
+    choiceButtonsEl.appendChild(btn);
+  });
+  choiceButtonsEl.style.display = 'flex';
+}
+
+function render(state) {
+  idleEl.style.display     = 'none';
+  textView.style.display   = 'none';
+  qrView.style.display     = 'none';
+  planView.style.display   = 'none';
+
+  if (state.type === 'text') {
+    document.getElementById('text-titre').textContent   = state.titre || '';
+    document.getElementById('text-contenu').textContent = state.contenu || '';
+    if (state.qr_url) {
+      document.getElementById('text-qr').src = state.qr_url + '?t=' + Date.now();
+      document.getElementById('text-qr-caption').textContent =
+        state.qr_mode === 'link'
+          ? 'Texte trop long pour un QR direct — scannez pour le télécharger sur votre téléphone'
+          : 'Scannez pour récupérer ce texte directement sur votre téléphone';
+    }
+    textView.style.display = 'flex';
+  } else if (state.type === 'qr') {
+    document.getElementById('qr-titre').textContent = state.titre || '';
+    document.getElementById('qr-image').src = state.image_url + '?t=' + Date.now();
+    qrView.style.display = 'flex';
+  } else if (state.type === 'plan') {
+    document.getElementById('plan-titre').textContent = state.titre || '';
+    document.getElementById('plan-image').src = state.image_url + '?t=' + Date.now();
+    document.getElementById('plan-qr').src = state.qr_url + '?t=' + Date.now();
+    planView.style.display = 'flex';
+  } else {
+    idleEl.style.display = 'flex';
+  }
+
+  // Idle = rien d'autre à montrer → la conversation reprend sa place.
+  // Tout autre contenu (texte/QR/plan) → elle se masque automatiquement.
+  setChatPanelVisible(state.type === 'idle' || !state.type);
+}
+
+// État initial injecté par le serveur (évite un écran vide le temps que le SSE se connecte)
+// json.dumps() produit un objet JS valide tel quel, pas besoin de JSON.parse.
+const initialState   = {{ initial_state | safe }};
+const initialStatus  = {{ initial_status | safe }};
+const initialChoices = {{ initial_choices | safe }};
+const initialChat    = {{ initial_chat | safe }};
+render(initialState);
+setAiStatus(initialStatus);
+setChoices(initialChoices);
+initialChat.forEach(m => appendBubble(m.role, m.text));
+
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen = () => { statusEl.textContent = 'connecté'; };
+  es.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.display) { render(msg.display); }
+    else if (msg.status) { setAiStatus(msg.status); }
+    else if ('choices' in msg) { setChoices(msg.choices); }
+    else if (msg.chat) { appendBubble(msg.chat.role, msg.chat.text); }
+  };
+  es.onerror = () => {
+    statusEl.textContent = 'reconnexion...';
+    es.close();
+    setTimeout(connect, 1000);
+  };
+}
+connect();
+</script>
+</body>
+</html>

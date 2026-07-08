@@ -1,8 +1,13 @@
 """Transport Île-de-France — geroTransport API v2."""
 
 import json
+from datetime import datetime
+
 import httpx
+import pytz
 from tools.registry import register
+
+_PARIS = pytz.timezone("Europe/Paris")
 
 _BASE_URL = "http://10.75.1.20:8001"
 _client   = httpx.Client(timeout=10.0, base_url=_BASE_URL)
@@ -10,6 +15,7 @@ _client   = httpx.Client(timeout=10.0, base_url=_BASE_URL)
 
 def _get(path: str, params: dict = None) -> dict:
     response = _client.get(path, params=params or {})
+    print(f"[TRANSPORT] GET {response.request.url} → {response.status_code}", flush=True)
     if not response.is_success:
         raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
     return response.json()
@@ -17,6 +23,7 @@ def _get(path: str, params: dict = None) -> dict:
 
 def _post(path: str, body: dict) -> dict:
     response = _client.post(path, json=body)
+    print(f"[TRANSPORT] POST {response.request.url} {body} → {response.status_code}", flush=True)
     if not response.is_success:
         raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
     return response.json()
@@ -25,7 +32,10 @@ def _post(path: str, body: dict) -> dict:
 def prochains_departs_arret(stop: str) -> str:
     """Prochains départs depuis un arrêt (nom libre, résolution auto)."""
     try:
-        return json.dumps(_get("/llm/next", {"stop": stop}), ensure_ascii=False)
+        data = _get("/llm/next", {"stop": stop})
+        # Ancre temporelle : sans elle le LLM annonce des trains déjà passés.
+        data["now"] = datetime.now(_PARIS).strftime("%H:%M")
+        return json.dumps(data, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)})
 

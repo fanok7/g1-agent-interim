@@ -10,6 +10,12 @@ from tools.registry import call as call_tool
 from tools.screenshot_tool import (send_image_email, FALL_RECIPIENT as _FALL_RECIPIENT,
                                    FIRE_RECIPIENT as _FIRE_RECIPIENT)
 
+try:
+    from tablet_server.server import push_chat, push_status
+    _TABLET_AVAILABLE = True
+except Exception:
+    _TABLET_AVAILABLE = False
+
 _RESPONDING_FLAG  = "/tmp/agent_responding"
 _FACE_STATE_FILE  = "/tmp/face_id_state.json"
 _FACE_STALE_SECS  = 5.0
@@ -150,7 +156,11 @@ async def receive_events_loop(ws):
                 rps_go_pending = False
 
         elif t == 'conversation.item.input_audio_transcription.completed':
-            print(f'[Toi] {e.get("transcript", "")}')
+            transcript = e.get("transcript", "")
+            print(f'[Toi] {transcript}')
+            if _TABLET_AVAILABLE and transcript.strip():
+                push_chat("user", transcript)
+                push_status("reflechit")
 
         elif t == 'response.output_audio.delta':
             audio_buf.extend(base64.b64decode(e['delta']))
@@ -158,7 +168,9 @@ async def receive_events_loop(ws):
                 print('[G1] Parle...')
                 _set_responding(True)
                 send_emotion("parle")
-                led.parle() 
+                led.parle()
+                if _TABLET_AVAILABLE:
+                    push_status("parle")
             responding = True
 
         elif t == 'response.output_audio_transcript.delta':
@@ -167,6 +179,8 @@ async def receive_events_loop(ws):
         elif t == 'response.output_audio.done':
             if audio_buf:
                 print(f'[G1] {text_buf}')
+                if _TABLET_AVAILABLE and text_buf.strip():
+                    push_chat("assistant", text_buf)
                 _maybe_reflex_gesture(text_buf)   # salut/applaudissements auto par le code
                 if rps_go_pending:
                     dur = len(audio_buf) / 2 / 24000.0
@@ -182,6 +196,8 @@ async def receive_events_loop(ws):
                 _audio_playing = False
                 send_emotion("content")
                 led.ecoute()
+                if _TABLET_AVAILABLE:
+                    push_status("ecoute")
                 text_buf = ''
                 responding = False
                 _set_responding(False)

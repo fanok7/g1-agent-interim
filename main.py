@@ -18,7 +18,7 @@ from robot.gestures import execute_gesture
 
 # Chargement des tools — l'import suffit à les enregistrer dans le registry
 import tools.web_search       # noqa: F401
-#import tools.database         # noqa: F401
+import tools.database         # noqa: F401
 import tools.gesture_tool     # noqa: F401
 import tools.gmail            # noqa: F401
 import tools.airlabs_tools    # noqa: F401
@@ -26,14 +26,17 @@ import tools.transport_tools  # noqa: F401
 import tools.googlemaps_tools # noqa: F401
 import tools.face_id_tool     # noqa: F401
 import tools.shake_hand_tool
-#import tools.vision_tool      # noqa: F401
-#import tools.rps_tool         # noqa: F401
-#import tools.spotify_tool     # noqa: F401
+import tools.vision_tool      # noqa: F401
+import tools.rps_tool         # noqa: F401
+import tools.spotify_tool     # noqa: F401
 import tools.datetime_tool    # noqa: F401
-#import tools.screenshot_tool  # noqa: F401
+import tools.screenshot_tool  # noqa: F401
 import tools.calendar_tool    # noqa: F401
-#import tools.qr_tool          # noqa: F401
+import tools.qr_tool          # noqa: F401
+import tools.tablet_tools     # noqa: F401 — proposer_choix + afficher_{texte,qr,plan}_ecran
 from tools.screenshot_tool import SCREENSHOT_DIR
+import uvicorn
+from tablet_server.server import app as tablet_app
 
 from agent.parler_client import send_emotion
 from agent.session import connect
@@ -52,6 +55,11 @@ VISION_FALL_CONFIG  = "/home/unitree/g1_agent_interim/vision/fall_detection/conf
 VISION_FIRE_SCRIPT  = "/home/unitree/g1_agent_interim/vision/fire_detection/main.py"
 VISION_FIRE_CONFIG  = "/home/unitree/g1_agent_interim/vision/fire_detection/config/g1.yaml"
 GESTURE_CMD_FILE    = "/tmp/gesture_cmd"
+TABLET_PORT         = 8000
+
+
+def _start_tablet_server():
+    uvicorn.run(tablet_app, host="0.0.0.0", port=TABLET_PORT, log_level="warning")
 
 send_emotion("content")
 
@@ -135,6 +143,8 @@ async def run():
     led.idle()
     spotify_player.start()
     threading.Thread(target=hand_idle.start, daemon=True).start()
+    threading.Thread(target=_start_tablet_server, daemon=True).start()
+    print(f"[G1] Tablette : http://0.0.0.0:{TABLET_PORT} (miroir écran — micro/voix restent sur le robot)")
     ws = await connect()
     print('[G1] Prêt. Parle pour commencer. (Ctrl+C pour quitter)')
     try:

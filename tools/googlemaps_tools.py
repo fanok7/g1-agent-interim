@@ -155,7 +155,10 @@ def get_place_details(place_id: str) -> dict:
 def geocode_address(address: str) -> dict:
     """Convert a human-readable address or landmark name to GPS coordinates."""
     try:
-        data = _get(_GEOCODING_BASE, {"address": address, "key": _api_key()})
+        # region="fr" biases geocoding toward France — without it, short/ambiguous
+        # names (e.g. "Bastille" alone, no city/country) return zero results even
+        # though they're unambiguous for a robot deployed in Paris/CDG.
+        data = _get(_GEOCODING_BASE, {"address": address, "region": "fr", "key": _api_key()})
         results = data.get("results", [])
         if not results:
             return {"error": f"No geocoding results for: {address}"}
@@ -229,6 +232,12 @@ def compute_route(
         data = _post(f"{_ROUTES_BASE}:computeRoutes", payload, field_mask)
         routes = data.get("routes", [])
         if not routes:
+            if mode == "TRANSIT":
+                # Routes API v2 a une couverture transit très partielle (répond
+                # 200 avec un corps vide sur beaucoup de trajets réels, ex.
+                # CDG → Bastille) — l'ancienne Directions API couvre bien mieux
+                # les transports en commun, on n'y bascule que dans ce cas précis.
+                return _legacy_transit_directions(origin_lat, origin_lng, dest_lat, dest_lng, departure_time)
             return {"error": "No route found between the given points"}
         route = routes[0]
         result = {
@@ -243,6 +252,45 @@ def compute_route(
         return result
     except GoogleMapsError as e:
         return {"error": str(e)}
+
+
+def _legacy_transit_directions(
+    origin_lat: float, origin_lng: float, dest_lat: float, dest_lng: float,
+    departure_time: Optional[str],
+) -> dict:
+    """Fallback transit-only : ancienne Directions API (bien meilleure couverture
+    transport en commun que Routes API v2). Renvoie le même format que compute_route."""
+    params = {
+        "origin": f"{origin_lat},{origin_lng}",
+        "destination": f"{dest_lat},{dest_lng}",
+        "mode": "transit",
+        "key": _api_key(),
+    }
+    # departure_time (compute_route) est un timestamp RFC3339 (format Routes API v2) —
+    # incompatible avec le format attendu ici (epoch Unix ou "now"). Non transmis :
+    # aucun appelant actuel ne fournit ce paramètre pour le mode transit.
+    try:
+        data = _get("https://maps.googleapis.com/maps/api/directions/json", params)
+    except GoogleMapsError as e:
+        return {"error": str(e)}
+    routes = data.get("routes", [])
+    if not routes:
+        return {"error": "No route found between the given points"}
+    leg = routes[0]["legs"][0]
+    result = {
+        "distance_meters": leg.get("distance", {}).get("value"),
+        "duration": f"{leg.get('duration', {}).get('value', 0)}s",
+        "legs": [{
+            "distanceMeters": leg.get("distance", {}).get("value"),
+            "duration": f"{leg.get('duration', {}).get('value', 0)}s",
+            "steps": [{"navigationInstruction": {"instructions": step.get("html_instructions", "")}}
+                      for step in leg.get("steps", [])],
+        }],
+    }
+    fare = data.get("fare")
+    if fare:
+        result["fare"] = fare
+    return result
 
 
 def compute_route_matrix(
