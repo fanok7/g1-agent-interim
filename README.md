@@ -1,6 +1,6 @@
-# G1 Agent
+# G1 Agent Aéroportuaire
 
-Agent vocal d'accueil pour aéroportuaire pour Charles de Gaulle, tournant sur robot **Unitree G1 EDU** (calculateur Jetson Orin NX).
+Agent vocal d'accueil pour aéroportuaire pour Charles de Gaulle aéroport, tournant sur robot **Unitree G1 EDU** (calculateur Jetson Orin NX).
 
 Seul le LLM est distant : l'audio du micro part en streaming vers l'**API OpenAI Realtime**, qui renvoie soit de l'audio à jouer, soit un appel de tool. **Tout le reste — capture micro, lecture haut-parleur, vision, gestes, exécution des tools — tourne en local sur le Jetson.** Le robot fonctionne donc sans aucun serveur intermédiaire : une connexion WebSocket sortante suffit.
 
@@ -12,7 +12,7 @@ Seul le LLM est distant : l'audio du micro part en streaming vers l'**API OpenAI
 │  • génère l'audio réponse   │         │  • supervise vision + librespot       │
 └─────────────────────────────┘         └───────────────────────────────────────┘
 ```
-vidéo de présentation: [![Demo G1 Agent](https://img.youtube.com/vi/fDE_c2kgEHU/maxresdefault.jpg)](https://www.youtube.com/watch?v=fDE_c2kgEHU)
+Vidéo de démonstration: [![Demo G1 Agent](https://img.youtube.com/vi/fDE_c2kgEHU/maxresdefault.jpg)](https://www.youtube.com/watch?v=fDE_c2kgEHU)
 ---
 
 ## Installation
@@ -94,7 +94,7 @@ Le personnage et les tools exposés dépendent du prompt actif, à basculer en b
 | Mode | Variable | Usage |
 |------|----------|-------|
 | **I-Interim** | `SYSTEM_PROMPT_IINTERIM` | Accueil agence intérim — prise de RDV, agenda, Gmail, transport IDF |
-| **CDG** | `SYSTEM_PROMPT_CDG` | Accueil Terminal 2F CDG — vols temps réel, Google Maps |
+| **CDG** | `SYSTEM_PROMPT_CDG` | Accueil Terminal 2F CDG — vols temps réel, Google Maps, transport IDF |
 
 ---
 
