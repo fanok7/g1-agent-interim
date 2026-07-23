@@ -1,6 +1,6 @@
-# G1 Agent Interim
+# G1 Agent
 
-Agent vocal d'accueil pour **I-Interim**, tournant sur robot **Unitree G1 EDU** (calculateur Jetson Orin NX).
+Agent vocal d'accueil pour aéroportuaire pour Charles de Gaulle, tournant sur robot **Unitree G1 EDU** (calculateur Jetson Orin NX).
 
 Seul le LLM est distant : l'audio du micro part en streaming vers l'**API OpenAI Realtime**, qui renvoie soit de l'audio à jouer, soit un appel de tool. **Tout le reste — capture micro, lecture haut-parleur, vision, gestes, exécution des tools — tourne en local sur le Jetson.** Le robot fonctionne donc sans aucun serveur intermédiaire : une connexion WebSocket sortante suffit.
 
